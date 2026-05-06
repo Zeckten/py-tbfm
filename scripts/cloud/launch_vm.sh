@@ -26,10 +26,10 @@ VM_NAME="${1:?usage: $0 <vm-name> <gpu-count>}"
 GPU_COUNT="${2:?usage: $0 <vm-name> <gpu-count>}"
 
 case "${GPU_COUNT}" in
-    1) MACHINE_TYPE="a2-highgpu-1g" ;;
-    2) MACHINE_TYPE="a2-highgpu-2g" ;;
-    4) MACHINE_TYPE="a2-highgpu-4g" ;;
-    8) MACHINE_TYPE="a2-highgpu-8g" ;;
+    1) MACHINE_TYPE="a2-highgpu-1g"; LOCAL_SSD_COUNT=1 ;;
+    2) MACHINE_TYPE="a2-highgpu-2g"; LOCAL_SSD_COUNT=2 ;;
+    4) MACHINE_TYPE="a2-highgpu-4g"; LOCAL_SSD_COUNT=4 ;;
+    8) MACHINE_TYPE="a2-highgpu-8g"; LOCAL_SSD_COUNT=8 ;;
     *) echo "ERROR: gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
 esac
 
@@ -51,17 +51,21 @@ fi
 mkdir -p /mnt/data
 chmod 777 /mnt/data
 
-# Pull data from GCS (parallel, resumable).
-sudo -u \$(logname 2>/dev/null || echo \$USER) \
-    gsutil -m rsync -r gs://${BUCKET}/data/ /mnt/data/
+# Pull data from GCS (parallel, resumable). Run as root — /mnt/data is 777 and
+# the data is read-only from this VM's perspective. Avoids logname/USER issues
+# under cloud-init where there's no controlling tty.
+gsutil -m rsync -r gs://${BUCKET}/data/ /mnt/data/
 
 # Pull latest repo (image has a snapshot; refresh in case of new commits).
 cd /opt/py-tbfm
 git fetch --depth 1 origin "\$(git rev-parse --abbrev-ref HEAD)" || true
 git pull --ff-only || true
 
-# Mark ready.
-touch /home/\$(ls /home | head -1)/.tbfm_ready
+# Mark ready under each interactive user's home (one of them is the SSH login).
+for u in \$(ls /home); do
+    touch "/home/\${u}/.tbfm_ready"
+    chown "\${u}:\${u}" "/home/\${u}/.tbfm_ready" 2>/dev/null || true
+done
 echo "READY at \$(date)"
 EOF
 )
@@ -79,7 +83,7 @@ gcloud compute instances create "${VM_NAME}" \
     --image-project="${PROJECT}" \
     --boot-disk-size="${BOOT_DISK_GB}GB" \
     --boot-disk-type=pd-balanced \
-    --local-ssd=interface=NVME \
+    $(for _ in $(seq 1 ${LOCAL_SSD_COUNT}); do echo --local-ssd=interface=NVME; done) \
     --metadata="install-nvidia-driver=False" \
     --metadata-from-file=startup-script=<(echo "${STARTUP_SCRIPT}") \
     --scopes=cloud-platform \
