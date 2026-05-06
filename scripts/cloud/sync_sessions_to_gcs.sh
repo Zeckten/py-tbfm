@@ -55,11 +55,13 @@ ALL_SESSIONS=("${HELD_IN[@]}" "${HELD_OUT[@]}")
 # into a temp dir first (rsync handles broken symlinks gracefully).
 PROBLEM_SESSIONS=(MonkeyJ_20160702_Session4_S1)
 
-# Top-level pickle files first (small, cheap).
+# Top-level metadata files (all small, all required by tbfm.dataset.load_meta).
 echo "Syncing top-level files..."
 gsutil -m cp ${DRY_RUN} \
     "${SOURCE_DIR}/bad_channels.pkl" \
     "${SOURCE_DIR}/electrode_positions.pkl" \
+    "${SOURCE_DIR}/table_of_experiments.csv" \
+    "${SOURCE_DIR}/README.md" \
     "${DEST}" || true
 
 is_problem_session() {
