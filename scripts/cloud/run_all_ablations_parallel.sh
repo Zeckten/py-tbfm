@@ -50,12 +50,11 @@ for abl in "${!ABLATION_GPU[@]}"; do
     log="${LOG_DIR}/${abl}.log"
     echo "  [${abl}] GPU=${gpu}  log=${log}"
 
-    # Launch in background. CUDA_VISIBLE_DEVICES masks all GPUs except the
-    # assigned one, which appears as device 0 inside Python — so the inner
-    # script uses --cuda-device 0.
+    # Launch in background. tta_testing.py's setup_environment() overwrites
+    # CUDA_VISIBLE_DEVICES based on --cuda-device, so we pass the physical GPU
+    # index directly and don't bother pre-setting CUDA_VISIBLE_DEVICES.
     (
-        export CUDA_VISIBLE_DEVICES="${gpu}"
-        export GPU_FLAGS_OVERRIDE="--cuda-device 0"
+        export GPU_FLAGS_OVERRIDE="--cuda-device ${gpu}"
         if [ "${abl}" = "no_adapt_ae" ]; then
             # no_adapt_ae reuses the baseline model with --no-adapt-ae at TTA time.
             # Easiest path: invoke tta_ablations.sh directly with ABLATION_NAMES=(no_adapt_ae)
@@ -78,7 +77,7 @@ for abl in "${!ABLATION_GPU[@]}"; do
                     --no-adapt-ae \
                     --unfreeze-bases --progressive-unfreezing-threshold 0 \
                     --max-adapt-sessions 20 --tta-epochs 7001 \
-                    --cuda-device 0
+                    --cuda-device "${gpu}"
         else
             bash "${RUNNER}" "${abl}" "${SUPPORT}"
         fi
