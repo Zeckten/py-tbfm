@@ -87,7 +87,9 @@ for abl in "${ABLATION_NAMES[@]}"; do
         continue
     fi
 
-    GPU_FLAGS=$(get_gpu_flags)
+    # GPU_FLAGS_OVERRIDE lets callers (e.g. cloud parallel runner) skip auto-detect
+    # and force a specific gpu config like "--cuda-device 0".
+    GPU_FLAGS="${GPU_FLAGS_OVERRIDE:-$(get_gpu_flags)}"
     EXTRA_FLAGS="${ABLATION_TTA_FLAGS[$abl]}"
     echo "=========================================="
     echo "TTA for ablation: ${abl}  [${GPU_FLAGS}]"
@@ -116,7 +118,7 @@ elif [ -d "${BASELINE_DIR}" ]; then
     if ls "${OUT_DIR}"/tta_support_*_per_session.csv 2>/dev/null | grep -q .; then
         echo "Skipping no_adapt_ae TTA (already complete)"
     else
-        GPU_FLAGS=$(get_gpu_flags)
+        GPU_FLAGS="${GPU_FLAGS_OVERRIDE:-$(get_gpu_flags)}"
         echo "=========================================="
         echo "TTA for ablation: no_adapt_ae  [${GPU_FLAGS}]"
         echo "  Support: ${SUPPORT_SIZE}"

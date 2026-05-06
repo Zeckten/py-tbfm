@@ -31,6 +31,12 @@ from tbfm import dataset, multisession, utils
 import notifications
 
 
+# TF32 on tensor cores: ~1.3-1.5x faster on A100, modest on 4090, near-zero
+# numerical impact for this regression workload. Safe to leave on always.
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
+
 # Constants
 DATA_DIR = os.getenv("TBFM_DATA_DIR", "/var/data/opto-coproc/")
 EMBEDDING_REST_SUBDIR = "embedding_rest"

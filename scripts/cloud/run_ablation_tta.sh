@@ -19,6 +19,7 @@ BUCKET="${BUCKET:?BUCKET env var required}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 RETRY="${REPO_ROOT}/scripts/cloud/retry_on_preemption.sh"
+WRAPPER="${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh"
 WORK_DIR="${WORK_DIR:-${REPO_ROOT}/ablations_remote}"
 
 # Pull the trained ablation model from GCS.
@@ -29,9 +30,15 @@ gsutil -m rsync -r "gs://${BUCKET}/ablations/${ABL}/" "${WORK_DIR}/${ABL}/"
 cd "${REPO_ROOT}"
 export TBFM_DATA_DIR="${TBFM_DATA_DIR:-/mnt/data}"
 
+# tta_ablations.sh writes per-session adapted models to ${WORK_DIR}/tta_${ABL}_${SUPPORT}/
+# as each session finishes. The wrapper rsyncs that dir to GCS every ~2 min so
+# spot evictions only cost the in-progress session.
+WATCH_DIR="${WORK_DIR}/tta_${ABL}_${SUPPORT}"
 echo "Running TTA: ablation=${ABL}, support=${SUPPORT}, work_dir=${WORK_DIR}"
+
 SUPPORT_SIZE="${SUPPORT}" \
     ABLATION_NAMES=("${ABL}") \
-    "${RETRY}" bash scripts/tta_ablations.sh "${WORK_DIR}"
+    bash "${WRAPPER}" "${WATCH_DIR}" \
+        "${RETRY}" bash scripts/tta_ablations.sh "${WORK_DIR}"
 
-echo "Done. Result: ${WORK_DIR}/tta_${ABL}_${SUPPORT}/"
+echo "Done. Result: ${WATCH_DIR}/"
