@@ -22,46 +22,62 @@ ZONE="${ZONE:-us-central1-a}"
 IMAGE_FAMILY="${IMAGE_FAMILY:-py-tbfm}"
 BOOT_DISK_GB="${BOOT_DISK_GB:-200}"
 
-VM_NAME="${1:?usage: $0 <vm-name> <gpu-count>}"
-GPU_COUNT="${2:?usage: $0 <vm-name> <gpu-count>}"
+VM_NAME="${1:?usage: $0 <vm-name> <gpu-count> [gpu-family]}"
+GPU_COUNT="${2:?usage: $0 <vm-name> <gpu-count> [gpu-family]}"
+GPU_FAMILY="${3:-a100}"   # "a100" or "rtx-pro-6000"
 
-case "${GPU_COUNT}" in
-    1) MACHINE_TYPE="a2-highgpu-1g"; LOCAL_SSD_COUNT=1 ;;
-    2) MACHINE_TYPE="a2-highgpu-2g"; LOCAL_SSD_COUNT=2 ;;
-    4) MACHINE_TYPE="a2-highgpu-4g"; LOCAL_SSD_COUNT=4 ;;
-    8) MACHINE_TYPE="a2-highgpu-8g"; LOCAL_SSD_COUNT=8 ;;
-    *) echo "ERROR: gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
+case "${GPU_FAMILY}" in
+    a100)
+        case "${GPU_COUNT}" in
+            1) MACHINE_TYPE="a2-highgpu-1g"; LOCAL_SSD_COUNT=1 ;;
+            2) MACHINE_TYPE="a2-highgpu-2g"; LOCAL_SSD_COUNT=2 ;;
+            4) MACHINE_TYPE="a2-highgpu-4g"; LOCAL_SSD_COUNT=4 ;;
+            8) MACHINE_TYPE="a2-highgpu-8g"; LOCAL_SSD_COUNT=8 ;;
+            *) echo "ERROR: a100 gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
+        esac
+        GPU_LABEL="A100"
+        ;;
+    rtx-pro-6000|pro6000|rtx)
+        # g4-standard-* machine family — RTX PRO 6000 (Blackwell, 96GB VRAM each).
+        case "${GPU_COUNT}" in
+            1) MACHINE_TYPE="g4-standard-48"; LOCAL_SSD_COUNT=0 ;;
+            2) MACHINE_TYPE="g4-standard-96"; LOCAL_SSD_COUNT=0 ;;
+            4) MACHINE_TYPE="g4-standard-192"; LOCAL_SSD_COUNT=0 ;;
+            8) MACHINE_TYPE="g4-standard-384"; LOCAL_SSD_COUNT=0 ;;
+            *) echo "ERROR: rtx-pro-6000 gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
+        esac
+        GPU_LABEL="RTX PRO 6000"
+        ;;
+    *)
+        echo "ERROR: unknown gpu-family '${GPU_FAMILY}' (expected a100 or rtx-pro-6000)" >&2
+        exit 1
+        ;;
 esac
 
-echo "Launching ${VM_NAME}: ${MACHINE_TYPE} (${GPU_COUNT}x A100), spot, in ${ZONE}"
+echo "Launching ${VM_NAME}: ${MACHINE_TYPE} (${GPU_COUNT}x ${GPU_LABEL}), spot, in ${ZONE}"
 
-# Startup script runs on VM boot. Logs to /var/log/tbfm-startup.log.
-# Mounts local SSD at /mnt/data, rsyncs data from GCS, writes ready sentinel.
-STARTUP_SCRIPT=$(cat <<EOF
+# DATA_DISK: name of an existing PD with session data, attached read-only at
+# /mnt/data. If empty, fall back to local-SSD + GCS rsync (legacy path).
+DATA_DISK="${DATA_DISK:-tbfm-data}"
+
+if [ -n "${DATA_DISK}" ]; then
+    # Mount the attached PD. No format, no GCS sync.
+    STARTUP_SCRIPT=$(cat <<EOF
 #!/bin/bash
 exec > /var/log/tbfm-startup.log 2>&1
 set -euxo pipefail
 
-# Format and mount local SSD if present, else use boot disk.
-if [ -e /dev/nvme0n1 ] && ! mountpoint -q /mnt/data; then
-    mkfs.ext4 -F /dev/nvme0n1 || true
-    mkdir -p /mnt/data
-    mount -o discard,defaults /dev/nvme0n1 /mnt/data
-fi
+# The data disk is attached as /dev/disk/by-id/google-${DATA_DISK} and we
+# mount it read-only at /mnt/data.
 mkdir -p /mnt/data
-chmod 777 /mnt/data
+mount -o ro,noload /dev/disk/by-id/google-${DATA_DISK} /mnt/data
+chmod 755 /mnt/data
 
-# Pull data from GCS (parallel, resumable). Run as root — /mnt/data is 777 and
-# the data is read-only from this VM's perspective. Avoids logname/USER issues
-# under cloud-init where there's no controlling tty.
-gsutil -m rsync -r gs://${BUCKET}/data/ /mnt/data/
-
-# Pull latest repo (image has a snapshot; refresh in case of new commits).
+# Refresh repo to branch tip.
 cd /opt/py-tbfm
 git fetch --depth 1 origin "\$(git rev-parse --abbrev-ref HEAD)" || true
 git pull --ff-only || true
 
-# Mark ready under each interactive user's home (one of them is the SSH login).
 for u in \$(ls /home); do
     touch "/home/\${u}/.tbfm_ready"
     chown "\${u}:\${u}" "/home/\${u}/.tbfm_ready" 2>/dev/null || true
@@ -69,10 +85,45 @@ done
 echo "READY at \$(date)"
 EOF
 )
+else
+    # Legacy path: format local SSD, sync from GCS.
+    STARTUP_SCRIPT=$(cat <<EOF
+#!/bin/bash
+exec > /var/log/tbfm-startup.log 2>&1
+set -euxo pipefail
+
+if [ -e /dev/nvme0n1 ] && ! mountpoint -q /mnt/data; then
+    mkfs.ext4 -F /dev/nvme0n1 || true
+    mkdir -p /mnt/data
+    mount -o discard,defaults /dev/nvme0n1 /mnt/data
+fi
+mkdir -p /mnt/data
+chmod 777 /mnt/data
+gsutil -m rsync -r gs://${BUCKET}/data/ /mnt/data/
+
+cd /opt/py-tbfm
+git fetch --depth 1 origin "\$(git rev-parse --abbrev-ref HEAD)" || true
+git pull --ff-only || true
+
+for u in \$(ls /home); do
+    touch "/home/\${u}/.tbfm_ready"
+    chown "\${u}:\${u}" "/home/\${u}/.tbfm_ready" 2>/dev/null || true
+done
+echo "READY at \$(date)"
+EOF
+)
+fi
 
 # Build the gcloud invocation.
 # --provisioning-model=SPOT + --instance-termination-action=DELETE for spot pricing.
 # --local-ssd is included in a2 machine prices.
+DISK_FLAG=""
+if [ -n "${DATA_DISK}" ]; then
+    # Attach existing PD read-only at /dev/disk/by-id/google-${DATA_DISK}.
+    # mode=ro lets multiple VMs mount the same disk simultaneously.
+    DISK_FLAG="--disk=name=${DATA_DISK},device-name=${DATA_DISK},mode=ro,boot=no"
+fi
+
 gcloud compute instances create "${VM_NAME}" \
     --project="${PROJECT}" \
     --zone="${ZONE}" \
@@ -84,6 +135,7 @@ gcloud compute instances create "${VM_NAME}" \
     --boot-disk-size="${BOOT_DISK_GB}GB" \
     --boot-disk-type=pd-balanced \
     $(for _ in $(seq 1 ${LOCAL_SSD_COUNT}); do echo --local-ssd=interface=NVME; done) \
+    ${DISK_FLAG} \
     --metadata="install-nvidia-driver=False" \
     --metadata-from-file=startup-script=<(echo "${STARTUP_SCRIPT}") \
     --scopes=cloud-platform \
