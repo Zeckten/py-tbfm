@@ -1284,8 +1284,10 @@ def load_stim_batched(
 
 
 def load_rest_embeddings(
-    session_ids, in_dir="/var/data/opto-coproc/", in_subdir="embedding_rest", device=None
+    session_ids, in_dir=None, in_subdir="embedding_rest", device=None
 ):
+    if in_dir is None:
+        in_dir = os.environ.get("TBFM_DATA_DIR", "/var/data/opto-coproc/")
     """
     See meta.cache_rest_embeds.
     """
