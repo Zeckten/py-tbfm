@@ -22,10 +22,21 @@ RETRY="${REPO_ROOT}/scripts/cloud/retry_on_preemption.sh"
 WRAPPER="${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh"
 WORK_DIR="${WORK_DIR:-${REPO_ROOT}/ablations_remote}"
 
-# Pull the trained ablation model from GCS.
-mkdir -p "${WORK_DIR}/${ABL}"
-echo "Syncing gs://${BUCKET}/ablations/${ABL}/ -> ${WORK_DIR}/${ABL}/"
-gsutil -m rsync -r "gs://${BUCKET}/ablations/${ABL}/" "${WORK_DIR}/${ABL}/"
+# no_adapt_ae is special: it reuses the baseline trained model with --no-adapt-ae
+# flag at TTA time. Pull baseline into both ${WORK_DIR}/baseline AND ${WORK_DIR}/no_adapt_ae
+# so tta_ablations.sh's no_adapt_ae block (which looks for baseline) AND the
+# generic per-ablation lookup both succeed.
+if [ "${ABL}" = "no_adapt_ae" ]; then
+    SRC_NAME="baseline"
+    mkdir -p "${WORK_DIR}/baseline" "${WORK_DIR}/no_adapt_ae"
+    echo "Syncing baseline model into both baseline/ and no_adapt_ae/ for no_adapt_ae ablation"
+    gsutil -m rsync -r "gs://${BUCKET}/ablations/baseline/" "${WORK_DIR}/baseline/"
+    gsutil -m rsync -r "gs://${BUCKET}/ablations/baseline/" "${WORK_DIR}/no_adapt_ae/"
+else
+    mkdir -p "${WORK_DIR}/${ABL}"
+    echo "Syncing gs://${BUCKET}/ablations/${ABL}/ -> ${WORK_DIR}/${ABL}/"
+    gsutil -m rsync -r "gs://${BUCKET}/ablations/${ABL}/" "${WORK_DIR}/${ABL}/"
+fi
 
 cd "${REPO_ROOT}"
 export TBFM_DATA_DIR="${TBFM_DATA_DIR:-/mnt/data}"

@@ -36,9 +36,11 @@ case "${GPU_FAMILY}" in
             *) echo "ERROR: a100 gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
         esac
         GPU_LABEL="A100"
+        BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-pd-balanced}"
         ;;
     rtx-pro-6000|pro6000|rtx)
         # g4-standard-* machine family — RTX PRO 6000 (Blackwell, 96GB VRAM each).
+        # g4 boot disks must be pd-ssd or hyperdisk (no pd-balanced).
         case "${GPU_COUNT}" in
             1) MACHINE_TYPE="g4-standard-48"; LOCAL_SSD_COUNT=0 ;;
             2) MACHINE_TYPE="g4-standard-96"; LOCAL_SSD_COUNT=0 ;;
@@ -47,6 +49,21 @@ case "${GPU_FAMILY}" in
             *) echo "ERROR: rtx-pro-6000 gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
         esac
         GPU_LABEL="RTX PRO 6000"
+        BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-pd-ssd}"
+        ;;
+    l4)
+        # g2-standard-* machine family — NVIDIA L4 (Ada, 24GB VRAM each).
+        # Cheapest GCP datacenter GPU. Fine for our compute-bound TTA workload
+        # since we only need ~6GB VRAM and spot is ~$0.30-0.50/hr.
+        case "${GPU_COUNT}" in
+            1) MACHINE_TYPE="g2-standard-8"; LOCAL_SSD_COUNT=0 ;;
+            2) MACHINE_TYPE="g2-standard-24"; LOCAL_SSD_COUNT=0 ;;
+            4) MACHINE_TYPE="g2-standard-48"; LOCAL_SSD_COUNT=0 ;;
+            8) MACHINE_TYPE="g2-standard-96"; LOCAL_SSD_COUNT=0 ;;
+            *) echo "ERROR: l4 gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
+        esac
+        GPU_LABEL="L4"
+        BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-pd-balanced}"
         ;;
     *)
         echo "ERROR: unknown gpu-family '${GPU_FAMILY}' (expected a100 or rtx-pro-6000)" >&2
@@ -57,8 +74,9 @@ esac
 echo "Launching ${VM_NAME}: ${MACHINE_TYPE} (${GPU_COUNT}x ${GPU_LABEL}), spot, in ${ZONE}"
 
 # DATA_DISK: name of an existing PD with session data, attached read-only at
-# /mnt/data. If empty, fall back to local-SSD + GCS rsync (legacy path).
-DATA_DISK="${DATA_DISK:-tbfm-data}"
+# /mnt/data. Pass DATA_DISK="" to fall back to local-SSD/boot-disk + GCS rsync.
+# Use ${DATA_DISK-tbfm-data} (no colon) so explicit empty is respected.
+DATA_DISK="${DATA_DISK-tbfm-data}"
 
 if [ -n "${DATA_DISK}" ]; then
     # Mount the attached PD. No format, no GCS sync.
@@ -86,17 +104,25 @@ echo "READY at \$(date)"
 EOF
 )
 else
-    # Legacy path: format local SSD, sync from GCS.
+    # Legacy path: optionally format a local SSD, sync from GCS.
+    # /dev/nvme0n1 might be the boot disk on machines without dedicated local SSDs
+    # (e.g. g4); only attempt to format+mount it if it's NOT already in use as
+    # part of the root filesystem.
     STARTUP_SCRIPT=$(cat <<EOF
 #!/bin/bash
 exec > /var/log/tbfm-startup.log 2>&1
 set -euxo pipefail
 
-if [ -e /dev/nvme0n1 ] && ! mountpoint -q /mnt/data; then
+# Only format /dev/nvme0n1 if it exists AND is not the system root disk AND
+# /mnt/data isn't already mounted on something.
+if [ -e /dev/nvme0n1 ] && ! findmnt -n / | grep -q nvme0n1 \\
+        && ! mountpoint -q /mnt/data \\
+        && ! lsblk /dev/nvme0n1 -o MOUNTPOINTS -n | grep -q .; then
     mkfs.ext4 -F /dev/nvme0n1 || true
     mkdir -p /mnt/data
-    mount -o discard,defaults /dev/nvme0n1 /mnt/data
+    mount -o discard,defaults /dev/nvme0n1 /mnt/data || true
 fi
+# If we didn't get a separate disk mounted, /mnt/data is on the boot disk.
 mkdir -p /mnt/data
 chmod 777 /mnt/data
 gsutil -m rsync -r gs://${BUCKET}/data/ /mnt/data/
@@ -133,7 +159,7 @@ gcloud compute instances create "${VM_NAME}" \
     --image-family="${IMAGE_FAMILY}" \
     --image-project="${PROJECT}" \
     --boot-disk-size="${BOOT_DISK_GB}GB" \
-    --boot-disk-type=pd-balanced \
+    --boot-disk-type="${BOOT_DISK_TYPE}" \
     $(for _ in $(seq 1 ${LOCAL_SSD_COUNT}); do echo --local-ssd=interface=NVME; done) \
     ${DISK_FLAG} \
     --metadata="install-nvidia-driver=False" \
