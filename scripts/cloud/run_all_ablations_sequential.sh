@@ -86,9 +86,15 @@ echo ""
 if [ ${#FAILED[@]} -eq 0 ]; then
     echo "All ablations completed successfully."
 else
+    # Failures still trigger AUTO_SHUTDOWN. Logs and any partial output have
+    # already been rsynced to GCS by the wrapper; nothing about an idle VM
+    # helps diagnose the failure, and leaving it running burns money fast on
+    # multi-GPU VMs (~$8/hr for g4-standard-384). Fix the underlying issue
+    # locally and re-run.
     echo "${#FAILED[@]} ablation(s) failed: ${FAILED[*]}"
-    echo "VM kept alive for debugging. Run teardown_vm.sh manually when done."
-    exit 1
+    echo "Logs rsynced to gs://${BUCKET}/results/incremental/${HOSTNAME}/"
+    # Fall through to AUTO_SHUTDOWN block. We still exit non-zero at the end
+    # so the caller knows something went wrong.
 fi
 
 # Auto-shutdown only on full success. Modes:
@@ -130,3 +136,6 @@ if [ -n "${ACTION}" ]; then
         echo "  gcloud compute instances start ${VM_NAME} --zone=${ZONE} --project=${PROJECT}"
     fi
 fi
+
+# Exit non-zero if anything failed, so a manual caller (or CI) can detect it.
+[ ${#FAILED[@]} -eq 0 ] || exit 1
