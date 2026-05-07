@@ -13,7 +13,8 @@
 # Env:
 #   BUCKET           required — GCS bucket for ablation models + result rsync
 #   GPU_IDS          default "0 1 2 3 4 5 6 7" — passed to tta_testing.py multi-gpu
-#   AUTO_SHUTDOWN    default 1 — delete VM on success. Set to 0 to keep VM alive.
+#   AUTO_SHUTDOWN    default 1 (=stop) — stop VM on success preserving boot disk.
+#                    Set to "delete" to fully tear down, "0" to leave running.
 #   ABLATIONS        default all 7 — space-separated list of ablation names
 #
 # Example:
@@ -90,25 +91,42 @@ else
     exit 1
 fi
 
-# Auto-shutdown only on full success.
-if [ "${AUTO_SHUTDOWN}" = "1" ]; then
+# Auto-shutdown only on full success. Modes:
+#   AUTO_SHUTDOWN=stop or 1 : stop VM, preserve boot disk (default — halts compute,
+#                             disk still billed; restart with `gcloud instances start`)
+#   AUTO_SHUTDOWN=delete    : delete VM and boot disk
+#   AUTO_SHUTDOWN=0         : leave VM running (you must manually shut down)
+case "${AUTO_SHUTDOWN}" in
+    1|stop)   ACTION="stop"   ;;
+    delete)   ACTION="delete" ;;
+    0|"")     ACTION=""       ;;
+    *) echo "WARNING: unknown AUTO_SHUTDOWN=${AUTO_SHUTDOWN}; leaving VM running"; ACTION="" ;;
+esac
+
+if [ -n "${ACTION}" ]; then
     echo ""
     echo "============================================================"
-    echo "AUTO_SHUTDOWN=1: deleting VM ${VM_NAME} in 60s (Ctrl-C to abort)"
+    echo "AUTO_SHUTDOWN: ${ACTION} VM ${VM_NAME} in 60s (Ctrl-C to abort)"
     echo "============================================================"
     sleep 60
-    # The VM has --scopes=cloud-platform from launch_vm.sh, so it can self-delete.
-    # Fetch zone from metadata server (ZONE env var may not be set on the VM).
     ZONE_FULL=$(curl -s -H "Metadata-Flavor: Google" \
         http://metadata.google.internal/computeMetadata/v1/instance/zone || echo "")
     ZONE=$(basename "${ZONE_FULL}")
     PROJECT=$(curl -s -H "Metadata-Flavor: Google" \
         http://metadata.google.internal/computeMetadata/v1/project/project-id || echo "")
     if [ -z "${ZONE}" ] || [ -z "${PROJECT}" ]; then
-        echo "ERROR: couldn't resolve zone/project from metadata; skipping self-delete"
+        echo "ERROR: couldn't resolve zone/project from metadata; leaving VM as-is"
         exit 0
     fi
-    echo "Self-deleting: gcloud compute instances delete ${VM_NAME} --zone=${ZONE} --project=${PROJECT}"
-    gcloud compute instances delete "${VM_NAME}" \
-        --zone="${ZONE}" --project="${PROJECT}" --quiet
+    if [ "${ACTION}" = "delete" ]; then
+        echo "Self-deleting: gcloud compute instances delete ${VM_NAME} --zone=${ZONE}"
+        gcloud compute instances delete "${VM_NAME}" \
+            --zone="${ZONE}" --project="${PROJECT}" --quiet
+    else
+        echo "Self-stopping: gcloud compute instances stop ${VM_NAME} --zone=${ZONE}"
+        gcloud compute instances stop "${VM_NAME}" \
+            --zone="${ZONE}" --project="${PROJECT}" --quiet
+        echo "VM stopped. Boot disk preserved (${VM_NAME} disk). Restart with:"
+        echo "  gcloud compute instances start ${VM_NAME} --zone=${ZONE} --project=${PROJECT}"
+    fi
 fi

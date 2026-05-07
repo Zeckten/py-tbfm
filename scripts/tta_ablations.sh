@@ -52,8 +52,12 @@ declare -A ABLATION_TTA_FLAGS=(
     ["no_l2"]="--lambda-l2 0"
 )
 
-# ABLATION_NAMES can be pre-set in the env (e.g. for single-ablation cloud runs).
-if [ -z "${ABLATION_NAMES+x}" ]; then
+# ABLATION_NAMES can be pre-set in the env. Bash arrays don't survive being
+# exported to a child process, so callers should use SINGLE_ABLATION="<name>"
+# (a regular string env var) to scope the sweep to one ablation.
+if [ -n "${SINGLE_ABLATION:-}" ]; then
+    ABLATION_NAMES=("${SINGLE_ABLATION}")
+elif [ -z "${ABLATION_NAMES+x}" ]; then
     ABLATION_NAMES=(
         "baseline"
         "zscore_norm"

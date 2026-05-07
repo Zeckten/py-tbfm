@@ -36,9 +36,20 @@ export TBFM_DATA_DIR="${TBFM_DATA_DIR:-/mnt/data}"
 WATCH_DIR="${WORK_DIR}/tta_${ABL}_${SUPPORT}"
 echo "Running TTA: ablation=${ABL}, support=${SUPPORT}, work_dir=${WORK_DIR}"
 
+# NOTE: We can't pass ABLATION_NAMES as a bash array env var (arrays don't
+# survive being exported — they get stringified to literal "(name)" with parens).
+# Use SINGLE_ABLATION as a regular string env var; tta_ablations.sh recognizes it.
 SUPPORT_SIZE="${SUPPORT}" \
-    ABLATION_NAMES=("${ABL}") \
+    SINGLE_ABLATION="${ABL}" \
     bash "${WRAPPER}" "${WATCH_DIR}" \
         "${RETRY}" bash scripts/tta_ablations.sh "${WORK_DIR}"
 
+# Sanity check: verify at least one session-result CSV or adapted_models entry
+# exists. tta_ablations.sh prints warnings and exits 0 if it can't find the
+# model dir, which silently breaks the sweep — fail loudly here instead.
+SESS_DIR="${WATCH_DIR}/adapted_models/${ABL}_support${SUPPORT}_maml"
+if [ ! -d "${SESS_DIR}" ] || [ -z "$(ls "${SESS_DIR}" 2>/dev/null)" ]; then
+    echo "ERROR: ${ABL} produced no session results (looked in ${SESS_DIR})" >&2
+    exit 11
+fi
 echo "Done. Result: ${WATCH_DIR}/"
