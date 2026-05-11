@@ -231,6 +231,10 @@ def parse_args():
         help="Set cfg.tbfm.module.use_tanh_basis_weights=False at TTA time"
     )
     parser.add_argument(
+        "--no-row-norm", action="store_true",
+        help="Set cfg.tbfm.module.use_basis_weight_row_norm=False at TTA time"
+    )
+    parser.add_argument(
         "--zero-rest-embeddings", action="store_true",
         help="Zero all rest embeddings before TTA (mirrors --no-rest-embeddings at training)"
     )
@@ -270,7 +274,7 @@ def apply_ablation_overrides(cfg, overrides: dict, log_prefix: str = ""):
     Apply ablation cfg overrides at TTA time so the model is run with the same cfg
     it was trained under. Prints every override applied for verification.
     `overrides` keys: normalizer, lambda_ae_recon, lambda_fro, lambda_l2, lambda_ortho,
-                      no_tanh_basis_weights (bool).
+                      no_tanh_basis_weights (bool), no_row_norm (bool).
     """
     if not overrides:
         print(f"{log_prefix}[ABLATION] No overrides — using default cfg")
@@ -305,6 +309,10 @@ def apply_ablation_overrides(cfg, overrides: dict, log_prefix: str = ""):
         prev = cfg.tbfm.module.get("use_tanh_basis_weights", True)
         cfg.tbfm.module.use_tanh_basis_weights = False
         print(f"{log_prefix}[ABLATION]   use_tanh_basis_weights: {prev} -> False")
+    if overrides.get("no_row_norm"):
+        prev = cfg.tbfm.module.get("use_basis_weight_row_norm", True)
+        cfg.tbfm.module.use_basis_weight_row_norm = False
+        print(f"{log_prefix}[ABLATION]   use_basis_weight_row_norm: {prev} -> False")
     OmegaConf.set_struct(cfg, True)
     return cfg
 
@@ -2373,6 +2381,7 @@ def _main_impl(args):
         "lambda_l2": args.lambda_l2,
         "lambda_ortho": args.lambda_ortho,
         "no_tanh_basis_weights": args.no_tanh_basis_weights,
+        "no_row_norm": args.no_row_norm,
     }
     # Drop None/False entries so apply_ablation_overrides only logs real overrides
     ablation_overrides = {k: v for k, v in ablation_overrides.items()

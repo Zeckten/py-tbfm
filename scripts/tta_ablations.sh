@@ -50,6 +50,7 @@ declare -A ABLATION_TTA_FLAGS=(
     ["with_ortho"]="--lambda-ortho 0.05"
     ["no_rest"]="--zero-rest-embeddings"
     ["no_l2"]="--lambda-l2 0"
+    ["no_tanh_no_rownorm"]="--no-tanh-basis-weights --no-row-norm"
 )
 
 # ABLATION_NAMES can be pre-set in the env. Bash arrays don't survive being
@@ -66,6 +67,7 @@ elif [ -z "${ABLATION_NAMES+x}" ]; then
         "with_ortho"
         "no_rest"
         "no_l2"
+        "no_tanh_no_rownorm"
     )
 fi
 
