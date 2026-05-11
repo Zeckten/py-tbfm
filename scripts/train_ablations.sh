@@ -63,6 +63,7 @@ declare -a ABLATION_NAMES=(
     "with_ortho"
     "no_rest"
     "no_l2"
+    "no_tanh_no_rownorm"
 )
 
 declare -A ABLATION_FLAGS=(
@@ -74,6 +75,7 @@ declare -A ABLATION_FLAGS=(
     ["with_ortho"]="--lambda-ortho 0.05"
     ["no_rest"]="--no-rest-embeddings"
     ["no_l2"]="--lambda-l2 0"
+    ["no_tanh_no_rownorm"]="--no-tanh-basis-weights --no-row-norm"
 )
 
 # -----------------------------------------------------------------------

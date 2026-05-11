@@ -45,43 +45,48 @@ echo "Launching ${#ABLATION_GPU[@]} ablations in parallel at support=${SUPPORT}"
 echo "Logs: ${LOG_DIR}/"
 echo ""
 
+# Helper invoked per ablation. Defined as a function so it gets called via
+# `bash -c "func name args"` with positional args — that way each background
+# job's view of $ABL and $GPU is its own argv, not a shared loop variable
+# that other iterations might mutate before the subshell starts evaluating.
+launch_one() {
+    local abl="$1"
+    local gpu="$2"
+    local support="$3"
+    export GPU_FLAGS_OVERRIDE="--cuda-device ${gpu}"
+    export TBFM_DATA_DIR="${TBFM_DATA_DIR:-/mnt/data}"
+    if [ "${abl}" = "no_adapt_ae" ]; then
+        # Reuses baseline model with --no-adapt-ae at TTA time.
+        mkdir -p "${WORK_DIR}/baseline"
+        gsutil -m -q rsync -r "gs://${BUCKET}/ablations/baseline/" "${WORK_DIR}/baseline/"
+        cd "${REPO_ROOT}"
+        local watch="${WORK_DIR}/tta_no_adapt_ae_${support}"
+        mkdir -p "${watch}"
+        bash "${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh" "${watch}" \
+            bash "${REPO_ROOT}/scripts/cloud/retry_on_preemption.sh" \
+            python -u tta_testing.py \
+                --model-paths "no_adapt_ae:${WORK_DIR}/baseline" \
+                --output-dir "${watch}" \
+                --support-sizes "${support}" \
+                --no-adapt-ae \
+                --unfreeze-bases --progressive-unfreezing-threshold 0 \
+                --max-adapt-sessions 20 --tta-epochs 7001 \
+                --cuda-device "${gpu}"
+    else
+        bash "${RUNNER}" "${abl}" "${support}"
+    fi
+}
+export -f launch_one
+export REPO_ROOT WORK_DIR RUNNER BUCKET
+
 for abl in "${!ABLATION_GPU[@]}"; do
     gpu="${ABLATION_GPU[$abl]}"
     log="${LOG_DIR}/${abl}.log"
     echo "  [${abl}] GPU=${gpu}  log=${log}"
 
-    # Launch in background. tta_testing.py's setup_environment() overwrites
-    # CUDA_VISIBLE_DEVICES based on --cuda-device, so we pass the physical GPU
-    # index directly and don't bother pre-setting CUDA_VISIBLE_DEVICES.
-    (
-        export GPU_FLAGS_OVERRIDE="--cuda-device ${gpu}"
-        if [ "${abl}" = "no_adapt_ae" ]; then
-            # no_adapt_ae reuses the baseline model with --no-adapt-ae at TTA time.
-            # Easiest path: invoke tta_ablations.sh directly with ABLATION_NAMES=(no_adapt_ae)
-            # and let its built-in no_adapt_ae block pick up the flag. But the script
-            # treats no_adapt_ae specially (the baseline-dir block). For uniformity
-            # here, just run it via a slightly customized invocation.
-            # Pull baseline model:
-            mkdir -p "${WORK_DIR}/baseline"
-            gsutil -m -q rsync -r "gs://${BUCKET}/ablations/baseline/" "${WORK_DIR}/baseline/"
-            cd "${REPO_ROOT}"
-            export TBFM_DATA_DIR="${TBFM_DATA_DIR:-/mnt/data}"
-            WATCH_DIR="${WORK_DIR}/tta_no_adapt_ae_${SUPPORT}"
-            mkdir -p "${WATCH_DIR}"
-            bash "${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh" "${WATCH_DIR}" \
-                bash "${REPO_ROOT}/scripts/cloud/retry_on_preemption.sh" \
-                python -u tta_testing.py \
-                    --model-paths "no_adapt_ae:${WORK_DIR}/baseline" \
-                    --output-dir "${WATCH_DIR}" \
-                    --support-sizes "${SUPPORT}" \
-                    --no-adapt-ae \
-                    --unfreeze-bases --progressive-unfreezing-threshold 0 \
-                    --max-adapt-sessions 20 --tta-epochs 7001 \
-                    --cuda-device "${gpu}"
-        else
-            bash "${RUNNER}" "${abl}" "${SUPPORT}"
-        fi
-    ) > "${log}" 2>&1 &
+    # Pass abl/gpu/support as positional args so each background job has its own
+    # argv. Avoids shared-variable races we've hit with naked subshells.
+    bash -c 'launch_one "$@"' _ "${abl}" "${gpu}" "${SUPPORT}" > "${log}" 2>&1 &
 
     PIDS[$abl]=$!
     sleep 1   # stagger launches slightly to avoid simultaneous gsutil contention

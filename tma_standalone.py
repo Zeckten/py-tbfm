@@ -77,7 +77,7 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
          latent_dim=None, batch_size_per_session=None, residual_mlp_hidden=None, out_dir=None, use_two_stage=False,
          embed_dim_stim=None, random_seed=None, held_in_sessions=None,
          normalizer=None, lambda_ae_recon=None, lambda_fro=None, lambda_ortho=None, lambda_l2=None,
-         no_rest_embeddings=False, no_tanh_basis_weights=False):
+         no_rest_embeddings=False, no_tanh_basis_weights=False, no_row_norm=False):
 
     if out_dir is None:
         my_out_dir = os.path.join(OUT_DIR, f"{num_bases}_{num_sessions}")
@@ -281,6 +281,8 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
         cfg.tbfm.training.lambda_ortho = lambda_ortho
     if no_tanh_basis_weights:
         cfg.tbfm.module.use_tanh_basis_weights = False
+    if no_row_norm:
+        cfg.tbfm.module.use_basis_weight_row_norm = False
 
     ms = multisession.build_from_cfg(cfg, data_train, device=DEVICE)
 
@@ -476,6 +478,8 @@ if __name__ == "__main__":
                         help='Zero out rest embeddings (ablate c_rest)')
     parser.add_argument('--no-tanh-basis-weights', action='store_true',
                         help='Remove tanh activation from basis weight network')
+    parser.add_argument('--no-row-norm', action='store_true',
+                        help='Disable L2 row-norm of basis weights (only meaningful with --no-tanh-basis-weights)')
 
     args = parser.parse_args()
     
@@ -509,6 +513,7 @@ if __name__ == "__main__":
             lambda_l2=args.lambda_l2,
             no_rest_embeddings=args.no_rest_embeddings,
             no_tanh_basis_weights=args.no_tanh_basis_weights,
+            no_row_norm=args.no_row_norm,
         )
     except Exception as e:
         notifications.notify_error(

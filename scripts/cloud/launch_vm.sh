@@ -86,9 +86,13 @@ exec > /var/log/tbfm-startup.log 2>&1
 set -euxo pipefail
 
 # The data disk is attached as /dev/disk/by-id/google-${DATA_DISK} and we
-# mount it read-only at /mnt/data.
+# mount it at /mnt/data (ro or rw depending on DATA_DISK_MODE).
 mkdir -p /mnt/data
-mount -o ro,noload /dev/disk/by-id/google-${DATA_DISK} /mnt/data
+if [ "${DATA_DISK_MODE}" = "rw" ]; then
+    mount /dev/disk/by-id/google-${DATA_DISK} /mnt/data
+else
+    mount -o ro,noload /dev/disk/by-id/google-${DATA_DISK} /mnt/data
+fi
 chmod 755 /mnt/data
 
 # Refresh repo to branch tip.
@@ -145,9 +149,11 @@ fi
 # --local-ssd is included in a2 machine prices.
 DISK_FLAG=""
 if [ -n "${DATA_DISK}" ]; then
-    # Attach existing PD read-only at /dev/disk/by-id/google-${DATA_DISK}.
-    # mode=ro lets multiple VMs mount the same disk simultaneously.
-    DISK_FLAG="--disk=name=${DATA_DISK},device-name=${DATA_DISK},mode=ro,boot=no"
+    # Attach existing PD at /dev/disk/by-id/google-${DATA_DISK}.
+    # DATA_DISK_MODE=ro lets multiple VMs share the same disk; rw is required for
+    # hyperdisk-balanced (which doesn't support multi-attach RO). Default: ro.
+    DATA_DISK_MODE="${DATA_DISK_MODE:-ro}"
+    DISK_FLAG="--disk=name=${DATA_DISK},device-name=${DATA_DISK},mode=${DATA_DISK_MODE},boot=no"
 fi
 
 gcloud compute instances create "${VM_NAME}" \
