@@ -6,7 +6,6 @@ import sys
 import torch
 from torch import nn
 from torch.optim.lr_scheduler import LambdaLR
-from torcheval.metrics.functional import r2_score
 from typing import Dict, Tuple, List
 
 from . import ae
@@ -16,6 +15,7 @@ from . import flow_ae  # Normalizing flow autoencoder support
 from . import normalizers
 from . import tbfm
 from . import utils
+from .utils import r2_score
 
 from ._multisession_module import TBFMMultisession
 
@@ -55,7 +55,6 @@ def build_from_cfg(
         aes = ae.from_cfg_and_data(
             cfg,
             session_data,
-            use_lora=shared_ae,
             latent_dim=latent_dim,
             shared=shared_ae,
             device=device,
@@ -201,21 +200,7 @@ def get_optims(cfg, model_ms: TBFMMultisession, embeddings_stim=None):
         raise NotImplementedError("No normalizer adaptation yet")
 
     if cfg.ae.training.coadapt:
-        use_two_stage = cfg.ae.use_two_stage
-
-        if use_two_stage:
-            # Two-stage AE returns a single optimizer with param groups
-            optim_ae = model_ms.ae.get_optim(
-                adapter_lr=cfg.ae.two_stage.adapter_lr,
-                encoder_lr=cfg.ae.two_stage.encoder_lr,
-                eps=cfg.ae.training.optim.eps,
-                weight_decay=cfg.ae.training.optim.weight_decay,
-                amsgrad=cfg.ae.training.optim.amsgrad,
-            )
-            optims_aes = [optim_ae]
-        else:
-            # Single-stage AE dispatcher returns dict of optimizers
-            optims_aes = list(model_ms.ae.get_optim(**cfg.ae.training.optim).values())
+        optims_aes = list(model_ms.ae.get_optim(**cfg.ae.training.optim).values())
     else:
         optims_aes = []
 
@@ -356,8 +341,6 @@ def train_from_cfg(
     support_size = support_size or cfg.meta.training.support_size
     ae_freeze_epoch = cfg.ae.training.ae_freeze_epoch
     lambda_ae_recon = cfg.ae.training.lambda_ae_recon
-    lambda_mu = cfg.ae.two_stage.lambda_mu
-    lambda_cov = cfg.ae.two_stage.lambda_cov
     device = model.device
 
     # Initialize embeddings_stim as trainable parameters if co-adapting
@@ -383,7 +366,7 @@ def train_from_cfg(
     train_r2s = []
     test_losses = []
     test_r2s = []
-    min_test_r2 = 1e99
+    max_test_r2 = -1e99
 
     # Track outlier statistics
     outlier_stats = {
@@ -472,8 +455,6 @@ def train_from_cfg(
         train_losses.append((eidx, cur_loss.item()))
 
         # Add AE reconstruction loss (optional)
-        use_two_stage = cfg.ae.use_two_stage
-
         if lambda_ae_recon > 0:
             runways_normalized, runways_recon = model.forward_reconstruct(query)
             ae_recon_loss = 0.0
@@ -485,28 +466,6 @@ def train_from_cfg(
             cur_loss += lambda_ae_recon * ae_recon_loss
         else:
             runways_normalized = None
-
-        # Add moment matching losses for two-stage AE (optional)
-        if use_two_stage:
-            if lambda_mu > 0 or lambda_cov > 0:
-                # Normalize runways if not already done
-                if runways_normalized is None:
-                    runways = {sid: d[0] for sid, d in query.items()}
-                    runways_normalized = model.norms(runways)
-
-                # Collect latents from all query sessions
-                all_z = []
-                for sid, runway_norm in runways_normalized.items():
-                    z = model.ae.encode(runway_norm, session_id=sid)
-                    all_z.append(z.flatten(end_dim=-2))  # Flatten batch/time
-
-                z_batch = torch.cat(all_z, dim=0)  # [total_samples, latent_dim]
-                L_mu, L_cov = model.ae.moment_matching_loss(z_batch)
-
-                if lambda_mu > 0:
-                    cur_loss += lambda_mu * L_mu
-                if lambda_cov > 0:
-                    cur_loss += lambda_cov * L_cov
 
         tbfm_regs = model.model.get_weighting_reg()
         cur_loss += (
@@ -531,24 +490,8 @@ def train_from_cfg(
         # Also: freeze AE after specified epoch to prevent late-stage overfitting
         skip_groups = []
 
-        use_two_stage = cfg.ae.use_two_stage
-
         if ae_freeze_epoch is not None and eidx >= ae_freeze_epoch:
-            if use_two_stage:
-                # For two-stage: optionally freeze only shared encoder/decoder, keep adapters trainable
-                freeze_only_shared = cfg.ae.two_stage.freeze_only_shared
-
-                if freeze_only_shared:
-                    # Freeze shared encoder/decoder parameters
-                    for param in model.ae.encoder.parameters():
-                        param.requires_grad = False
-                    # Adapters remain trainable - don't skip "ae" group
-                else:
-                    # Freeze entire AE (adapters + encoder/decoder)
-                    skip_groups.append("ae")
-            else:
-                # Single-stage: freeze all AE instances
-                skip_groups.append("ae")
+            skip_groups.append("ae")
 
         if alternating_updates:
             # Every basis_weight_steps_per_basis iterations, update both
@@ -618,10 +561,10 @@ def train_from_cfg(
                     except Exception as e:
                         pass  # Silently ignore notification errors
 
-                if r2_test < min_test_r2:
-                    min_test_r2 = r2_test
+                if r2_test > max_test_r2:
+                    max_test_r2 = r2_test
                     if model_save_path:
-                        save_model(model, model_save_path, tbfm_only=True)
+                        save_model(model, model_save_path)
 
     # ----- (optional) EMA of AE params -----
     # for p, p_ema in zip(model.ae_parameters(), ae_ema_params):
@@ -701,10 +644,10 @@ def train_from_cfg(
                 f"({final_test_results['outlier_stats']['pct_kept']:.1f}%)"
             )
 
-        if r2_test < min_test_r2:
-            min_test_r2 = r2_test
+        if r2_test > max_test_r2:
+            max_test_r2 = r2_test
             if model_save_path:
-                save_model(model, model_save_path, tbfm_only=True)
+                save_model(model, model_save_path)
 
     print("Final:", loss, r2_test)
 
@@ -798,6 +741,13 @@ def test_time_adaptation(
         train_set_size=None,
     )
     print(f"TTA: Using {support_size} samples for adaptation (support set)")
+
+    # Refit normalizers from support set (not from the full training set)
+    print("TTA: Refitting normalizers from support set...")
+    with torch.no_grad():
+        for session_id, d in data_for_adaptation.items():
+            x = torch.cat((d[0], d[2]), dim=1)  # runway + targets
+            model.norms.instances[session_id].fit(x)
 
     # AE warm start initialization using support data
     if ae_warm_start:

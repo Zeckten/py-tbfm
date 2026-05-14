@@ -176,7 +176,7 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
         else:
             batch_size = batch_size_per_session * num_sessions
     else:
-        raise ValueError("blah")
+        raise ValueError(f"num_sessions must be <= 40, got {num_sessions}")
 
     d, held_out_session_ids = multisession.load_stim_batched(
         window_size=WINDOW_SIZE,
@@ -191,7 +191,7 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
 
     held_in_session_ids = data_train.session_ids
 
-    # Gather cached rest embeddings...
+    # Gather cached rest embeddings
     embeddings_rest = multisession.load_rest_embeddings(
         held_in_session_ids, device=DEVICE
     )
@@ -247,10 +247,6 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
     cfg.latent_dim = latent_dim if latent_dim is not None else 85
     cfg.tbfm.module.num_bases = num_bases
     cfg.ae.training.lambda_ae_recon = 0.03
-    cfg.ae.use_two_stage = False
-    cfg.ae.two_stage.freeze_only_shared = False
-    cfg.ae.two_stage.lambda_mu = 0.01
-    cfg.ae.two_stage.lambda_cov = 0.01
     cfg.tbfm.training.lambda_fro = 75.0
 
     if basis_residual_rank_in == 0:
@@ -311,6 +307,7 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
     except Exception as e:
         print(f"Failed to create progress notification: {e}")
     
+    best_model_dir = os.path.join(my_out_dir, "best")
     embeddings_stim, results = multisession.train_from_cfg(
         cfg,
         ms,
@@ -323,6 +320,7 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
         epochs=cfg.training.epochs,
         random_sample_support=shuffle,
         progress_job_id=job_id,
+        model_save_path=best_model_dir,
     )
 
     # Save hyperparameters for TTA evaluation
@@ -346,7 +344,7 @@ def main(num_bases, num_sessions, gpu, coadapt=False, basis_residual_rank_in=Non
     torch.save(embeddings_stim, os.path.join(my_out_dir, "es.torch"))
     torch.save(results, os.path.join(my_out_dir, "r.torch"))
     torch.save(held_in_session_ids, os.path.join(my_out_dir, "hisi.torch"))
-    multisession.save_model(ms, os.path.join(my_out_dir, "model.torch"))
+    multisession.save_model(ms, os.path.join(my_out_dir, "model"))
 
     txt = [t[0] for t in results["train_losses"]]
     tlt = [t[1] for t in results["train_losses"]]
