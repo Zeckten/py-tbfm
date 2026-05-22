@@ -49,7 +49,7 @@ def percentile_affine(x, p_low=0.1, p_high=0.9, floor=1e-3):
     a = 2.0 / s
     b = -(qh + ql) / 2.0  # Average high and low; that's our new center
     # returns scale a and bias b such that x' = a*(x + b)
-    return a, b
+    return a.to(device), b.to(device)
 
 
 class SessionDispatcher:
