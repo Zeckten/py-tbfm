@@ -163,29 +163,3 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
-
-# Project-specific: environments
-.badvenv/
-
-# Project-specific: saved models / checkpoints
-models/
-
-# Experiment run output directories
-archive/
-data/
-test/
-session_count_sweep_*/
-state_dependency_results*/
-
-# Generated outputs
-predictions_*.png
-*.csv
-analysis/graphs_and_stats/
-analysis/per_channel_analysis/
-
-# Working documents
-sweep_plan.md
-prompt_*.md
-
-# Scratch notebooks
-visualize_session_predictions*.ipynb
