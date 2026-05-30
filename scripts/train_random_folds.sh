@@ -1,10 +1,23 @@
 #!/bin/bash
 # Train models with random folds of 20 sessions for cross-validation with TTA
+# Usage: $0 [sessions_file]
+# If sessions_file (JSON) is provided, uses those exact session sets instead of
+# sampling randomly. Generate one with scripts/random_folds_sessions.json.
+
+SESSIONS_FILE="$1"
+
+if [ -n "$SESSIONS_FILE" ] && [ ! -f "$SESSIONS_FILE" ]; then
+    echo "ERROR: Sessions file not found: $SESSIONS_FILE"
+    exit 1
+fi
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 OUTPUT_BASE="random_folds_${TIMESTAMP}"
 
 echo "Starting random folds training at ${TIMESTAMP}"
+if [ -n "$SESSIONS_FILE" ]; then
+    echo "Using fixed session sets from: ${SESSIONS_FILE}"
+fi
 echo "Output directory: ${OUTPUT_BASE}"
 
 # Create output directory and timing log
@@ -104,8 +117,25 @@ except:
     FOLD_START_TIMES[$i]=$START_TIME
     FOLD_GPUS[$GPU_ID]=$i
 
-    # Log which sessions will be selected (preview using Python)
-    SESSIONS=$(python -c "
+    # Determine session list for this fold
+    if [ -n "$SESSIONS_FILE" ]; then
+        SESSIONS=$(python -c "
+import json, sys
+with open('${SESSIONS_FILE}') as f:
+    folds = json.load(f)
+key = f'fold${i}'
+if key not in folds:
+    print(f'ERROR: {key} not found in sessions file', file=sys.stderr)
+    sys.exit(1)
+print(','.join(folds[key]))
+")
+        if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to read sessions for fold ${i} from ${SESSIONS_FILE}"
+            exit 1
+        fi
+        SEED_ARG=""
+    else
+        SESSIONS=$(python -c "
 import random
 random.seed($i)
 all_sessions = [
@@ -133,12 +163,13 @@ all_sessions = [
 selected = random.sample(all_sessions, ${NUM_SESSIONS})
 print(','.join(selected))
 ")
+        SEED_ARG="--random-seed $i"
+    fi
 
-    echo "Fold ${i} (seed: ${i}):" >> ${SESSION_LOG}
+    echo "Fold ${i}:" >> ${SESSION_LOG}
     echo "$SESSIONS" | tr ',' '\n' | sed 's/^/  - /' >> ${SESSION_LOG}
     echo "" >> ${SESSION_LOG}
 
-    # Use different random seeds for each fold to ensure different session selections
     python tma_standalone.py \
         ${NUM_BASES} \
         ${NUM_SESSIONS} \
@@ -150,7 +181,8 @@ print(','.join(selected))
         --latent-dim ${LATENT_DIM} \
         --batch-size-per-session ${BATCH_SIZE} \
         --out-dir ${OUT_DIR} \
-        --random-seed $i &
+        --held-in-sessions ${SESSIONS} \
+        ${SEED_ARG} &
 
     PID=$!
     GPU_PIDS[$GPU_ID]=$PID

@@ -27,7 +27,7 @@ echo "Folds directory: $FOLDS_DIR"
 echo ""
 
 # TTA parameters
-SUPPORT_SIZE=500
+SUPPORT_SIZES="500 1000 2500 5000"
 TTA_EPOCHS=7001
 NUM_FOLDS=20
 
@@ -41,7 +41,7 @@ if [ -n "$RESUME_DIR" ]; then
     TTA_OUTPUT_DIR="$RESUME_DIR"
     echo "Resuming previous run from: ${TTA_OUTPUT_DIR}"
 else
-    TTA_OUTPUT_DIR="${FOLDS_DIR}/tta_results_${SUPPORT_SIZE}_${TIMESTAMP}"
+    TTA_OUTPUT_DIR="${FOLDS_DIR}/tta_results_${TIMESTAMP}"
     mkdir -p ${TTA_OUTPUT_DIR}
 fi
 
@@ -67,7 +67,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
 done
 
 echo "Found ${AVAILABLE_FOLDS} folds to process"
-echo "Support size: ${SUPPORT_SIZE}"
+echo "Support sizes: ${SUPPORT_SIZES}"
 echo "TTA epochs: ${TTA_EPOCHS}"
 echo "Output directory: ${TTA_OUTPUT_DIR}"
 echo ""
@@ -117,7 +117,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         --model-paths fold${i}:${FOLD_DIR} \
         --use-multi-gpu \
         --gpu-ids 0 1 \
-        --support-sizes ${SUPPORT_SIZE} \
+        --support-sizes ${SUPPORT_SIZES} \
         --max-adapt-sessions 20 \
         --tta-epochs ${TTA_EPOCHS} \
         --output-dir ${FOLD_TTA_DIR} \
@@ -134,7 +134,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         echo "Fold ${i}: FAILED at ${FOLD_END_TS} (duration: ${FOLD_DURATION}s)" >> ${TIMING_LOG}
 
         # Log failure for all sessions in this fold
-        echo "${i},ALL,ALL,${SUPPORT_SIZE},NA,${FOLD_START_TS},${FOLD_END_TS},${FOLD_DURATION},FAILED" >> ${RESULTS_SUMMARY}
+        echo "${i},ALL,ALL,ALL,NA,${FOLD_START_TS},${FOLD_END_TS},${FOLD_DURATION},FAILED" >> ${RESULTS_SUMMARY}
 
         # Don't exit - continue with other folds
         echo "Continuing with remaining folds..."
@@ -183,7 +183,7 @@ except Exception as e:
         fi
     else
         echo "  WARNING: No results JSON file found"
-        echo "${i},ALL,ALL,${SUPPORT_SIZE},NA,${FOLD_START_TS},${FOLD_END_TS},${FOLD_DURATION},NO_RESULTS" >> ${RESULTS_SUMMARY}
+        echo "${i},ALL,ALL,ALL,NA,${FOLD_START_TS},${FOLD_END_TS},${FOLD_DURATION},NO_RESULTS" >> ${RESULTS_SUMMARY}
     fi
 
     # Force GPU memory cleanup between folds
