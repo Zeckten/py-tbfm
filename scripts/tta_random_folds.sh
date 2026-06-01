@@ -82,8 +82,9 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         continue
     fi
 
-    # Check if model files exist
-    if [ ! -f "${FOLD_DIR}/model_nf_1.torch" ] && [ ! -f "${FOLD_DIR}/model.torch" ]; then
+    # Check if model files exist (monolithic or split format)
+    if [ ! -f "${FOLD_DIR}/model_nf_1.torch" ] && [ ! -f "${FOLD_DIR}/model.torch" ] \
+            && [ ! -f "${FOLD_DIR}/model/tbfm.torch" ]; then
         echo "WARNING: No model file found in fold ${i}, skipping..."
         continue
     fi
@@ -112,10 +113,18 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
 
     mkdir -p ${FOLD_TTA_DIR}
 
+    # For split-format saves (twostage branch), point at best/ subdir so
+    # tta_testing.py finds tbfm.torch; it searches parent for hisi.torch.
+    if [ -f "${FOLD_DIR}/best/tbfm.torch" ]; then
+        MODEL_PATH="${FOLD_DIR}/best"
+    else
+        MODEL_PATH="${FOLD_DIR}"
+    fi
+
     # Run TTA for this fold on all held-out sessions
     # The script will automatically determine held-out sessions based on hisi file
     python tta_testing.py \
-        --model-paths fold${i}:${FOLD_DIR} \
+        --model-paths fold${i}:${MODEL_PATH} \
         --use-multi-gpu \
         --gpu-ids ${GPU_IDS} \
         --support-sizes ${SUPPORT_SIZES} \

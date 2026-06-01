@@ -370,11 +370,7 @@ def apply_ablation_overrides(cfg, overrides: dict, log_prefix: str = ""):
         prev = cfg.meta.training.stim_embedding_lambda_l2
         cfg.meta.training.stim_embedding_lambda_l2 = float(overrides["lambda_l2"])
         print(
-<<<<<<< HEAD
-            f"{log_prefix}[ABLATION]   stim_embedding_lambda_l2: {prev} -> {cfg.meta.training.stim_embedding_lambda_l2}"
-=======
             f"{log_prefix}[ABLATION]   lambda_l2: {prev} -> {cfg.meta.training.stim_embedding_lambda_l2}"
->>>>>>> 308f6a4 (lambda l2 rename)
         )
     if overrides.get("lambda_ortho") is not None:
         prev = cfg.tbfm.training.get("lambda_ortho", 0.0)

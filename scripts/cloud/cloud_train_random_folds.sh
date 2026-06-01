@@ -80,14 +80,16 @@ case "${AUTO_SHUTDOWN}" in
         sleep 60
         gcloud compute instances stop "$(hostname)" \
             --zone="$(basename "$(_vm_meta instance/zone)")" \
-            --project="$(_vm_meta project/project-id)" --quiet
+            --project="$(_vm_meta project/project-id)" \
+            --discard-local-ssd=true --quiet
         ;;
     delete)
         echo ""; echo "AUTO_SHUTDOWN: deleting VM in 60s (Ctrl-C to abort)"
         sleep 60
         gcloud compute instances delete "$(hostname)" \
             --zone="$(basename "$(_vm_meta instance/zone)")" \
-            --project="$(_vm_meta project/project-id)" --quiet
+            --project="$(_vm_meta project/project-id)" --quiet \
+            --discard-local-ssd=true
         ;;
     0|"")
         echo "AUTO_SHUTDOWN=0 — leaving VM running" ;;
