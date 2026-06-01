@@ -18,7 +18,7 @@ python3 - <<'PYEOF'
 import torch, json, math
 from pathlib import Path
 
-for fold_n in [0, 1, 2]:
+for fold_n in range(20):
     BASE = Path(f"random_folds_20260530_213515/tta_results_20260601_022544/fold{fold_n}")
     am = BASE / "adapted_models"
     if not am.exists():
