@@ -132,7 +132,8 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         --tta-epochs ${TTA_EPOCHS} \
         --output-dir ${FOLD_TTA_DIR} \
         --unfreeze-bases \
-        --progressive-unfreezing-threshold 0
+        --progressive-unfreezing-threshold 0 \
+        --no-plot-display
 
     EXIT_CODE=$?
     FOLD_END=$(date +%s)
