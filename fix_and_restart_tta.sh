@@ -4,6 +4,9 @@
 
 set -euo pipefail
 source .venv/bin/activate
+
+echo "=== Pulling latest code ==="
+git fetch --depth 1 origin twostage-experiments && git reset --hard FETCH_HEAD
 TTA_DIR="random_folds_20260530_213515/tta_results_20260601_022544"
 
 echo "=== Step 1: Kill any remaining GPU workers ==="
