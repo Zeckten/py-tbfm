@@ -2577,13 +2577,25 @@ def run_tta_sweep(
     }
 
 
+def _sanitize_for_json(obj):
+    """Replace nan/inf with None so json.dump never raises on bad R² values."""
+    if isinstance(obj, float):
+        import math
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def save_results(results: Dict, output_dir: Path):
     """Save results to JSON file and per-session R² scores to CSV."""
     timestamp = results["metadata"]["timestamp"]
     json_path = output_dir / f"tta_support_{timestamp}.json"
 
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+        json.dump(_sanitize_for_json(results), f, indent=2)
 
     print(f"Results saved to: {json_path}")
 
