@@ -139,10 +139,10 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     FOLD_DURATION=$((FOLD_END - FOLD_START))
     FOLD_END_TS=$(date +%Y%m%d_%H%M%S)
 
-    # If tta_testing.py exited non-zero but adapted_models exist, reconstruct
-    # the results JSON so the fold isn't re-run on next invocation.
-    if [ ${EXIT_CODE} -ne 0 ] && [ -d "${FOLD_TTA_DIR}/adapted_models" ]; then
-        echo "TTA exited non-zero for fold ${i} but adapted_models exist — reconstructing JSON"
+    # If no results JSON exists but adapted_models do, reconstruct from metadata.torch.
+    # Covers both non-zero exit and silent failures (exit 0 but no JSON written).
+    if [ -d "${FOLD_TTA_DIR}/adapted_models" ] && ! ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1; then
+        echo "No results JSON for fold ${i} — reconstructing from adapted_models"
         python -c "
 import torch, json, math
 from pathlib import Path
