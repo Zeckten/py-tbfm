@@ -3,9 +3,19 @@
 #
 # Usage:
 #   bash scripts/cloud/monitor_vm.sh [vm-name]
+#   bash scripts/cloud/monitor_vm.sh              # auto-picks running VM
 #   watch -n 60 bash scripts/cloud/monitor_vm.sh
 
-VM_NAME="${1:-random-folds-train}"
+# Auto-detect running VM if no name given
+if [ -z "${1:-}" ]; then
+    VM_NAME=$(gcloud compute instances list \
+        --project="${PROJECT:-nsf-2223495-425310}" \
+        --filter="status=RUNNING AND name~random-folds" \
+        --format="value(name)" 2>/dev/null | head -1)
+    VM_NAME="${VM_NAME:-random-folds-train}"
+else
+    VM_NAME="$1"
+fi
 PROJECT="${PROJECT:-nsf-2223495-425310}"
 ZONE="${ZONE:-us-central1-f}"
 BUCKET="${BUCKET:-py-tbfm-danmuir}"
@@ -81,13 +91,23 @@ if not tta_dirs:
     print(\"no_tta\")
 else:
     base = tta_dirs[-1]
-    # Find active fold (highest fold dir with adapted_models)
-    fold_dirs = sorted(base.glob(\"fold*\"), key=lambda p: int(p.name.replace(\"fold\",\"\")))
+    # Prefer fold from timing log (most recently STARTED)
     active = None
-    for fd in reversed(fold_dirs):
-        if (fd / \"adapted_models\").exists():
-            active = fd
-            break
+    import re as _re
+    tlog = base / \"tta_timing_log.txt\"
+    if tlog.exists():
+        for line in reversed(tlog.read_text().splitlines()):
+            m = _re.search(r\"Fold (\\d+): STARTED\", line)
+            if m:
+                active = base / f\"fold{m.group(1)}\"
+                break
+    # Fall back to highest fold dir with adapted_models
+    if active is None or not active.exists():
+        fold_dirs = sorted(base.glob(\"fold*\"), key=lambda p: int(p.name.replace(\"fold\",\"\")))
+        for fd in reversed(fold_dirs):
+            if (fd / \"adapted_models\").exists():
+                active = fd
+                break
     if active is None:
         print(\"initializing\")
     else:
@@ -156,15 +176,18 @@ TMUX_LINE=$(echo "$META" | tail -n +2)
 echo "Dir:  ${OUT_DIR:-none}"
 echo "tmux: ${TMUX_LINE}"
 
-# Training
+# Training (only show if a timing log exists)
 TRAIN=$(sec "TRAIN")
 T_DONE=$(echo "$TRAIN" | head -1 | grep -o 'done=[0-9]*' | cut -d= -f2); T_DONE=${T_DONE:-0}
 T_FAIL=$(echo "$TRAIN" | head -1 | grep -o 'fail=[0-9]*' | cut -d= -f2); T_FAIL=${T_FAIL:-0}
-echo ""
-echo "── Training ─────────────────────────────────────"
-printf "  "; bar "$T_DONE" 20; echo ""
-echo "$TRAIN" | tail -n +2 | sed 's/^/  /'
-[ "$T_FAIL" -gt 0 ] && echo "  ⚠ ${T_FAIL} failed"
+TRAIN_BODY=$(echo "$TRAIN" | tail -n +2)
+if [ "$TRAIN_BODY" != "(not started)" ]; then
+    echo ""
+    echo "── Training ─────────────────────────────────────"
+    printf "  "; bar "$T_DONE" 20; echo ""
+    echo "$TRAIN_BODY" | sed 's/^/  /'
+    [ "$T_FAIL" -gt 0 ] && echo "  ⚠ ${T_FAIL} failed"
+fi
 
 # TTA fold-level
 TTA=$(sec "TTA")
