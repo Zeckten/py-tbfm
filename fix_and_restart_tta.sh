@@ -38,8 +38,12 @@ for fold_n in [0, 1, 2]:
             m = s / "metadata.torch"
             if m.exists():
                 d = torch.load(m, weights_only=False)
-                per_session.update(d.get("per_session_r2s", {}))
-                finals.append(d.get("final_r2", float("nan")))
+                # Use final_r2 (correct R²) keyed by session id
+                sess_ids = d.get("adapt_session_ids", [])
+                final_r2 = d.get("final_r2", float("nan"))
+                for sid in sess_ids:
+                    per_session[sid] = final_r2
+                finals.append(final_r2)
         if per_session:
             v = [x for x in finals if not math.isnan(x)]
             mean_r2 = sum(v)/len(v) if v else float("nan")

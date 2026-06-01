@@ -157,12 +157,14 @@ for sd in sorted(am.glob('*_support*')):
         m = s / 'metadata.torch'
         if m.exists():
             d = torch.load(m, weights_only=False)
-            ps.update(d.get('per_session_r2s', {}))
-            finals.append(d.get('final_r2', float('nan')))
+            final_r2 = d.get('final_r2', float('nan'))
+            for sid in d.get('adapt_session_ids', []):
+                ps[sid] = float(final_r2)
+            finals.append(final_r2)
     if ps:
         v = [x for x in finals if not math.isnan(float(x))]
         runs.append({'model': 'fold${i}', 'strategy': 'inner_outer', 'support_size': sup,
-                     'r2': float(sum(v)/len(v)) if v else None, 'per_session_r2s': {k: float(val) for k,val in ps.items()}})
+                     'r2': float(sum(v)/len(v)) if v else None, 'per_session_r2s': ps})
 if runs:
     out = BASE / 'tta_support_reconstructed.json'
     json.dump({'runs': runs}, open(out,'w'))
