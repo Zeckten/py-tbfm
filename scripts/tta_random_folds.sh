@@ -27,7 +27,8 @@ echo "Folds directory: $FOLDS_DIR"
 echo ""
 
 # TTA parameters
-SUPPORT_SIZES="500 1000 2500 5000"
+SUPPORT_SIZES="${SUPPORT_SIZES:-500 1000 2500 5000}"
+GPU_IDS="${GPU_IDS:-0 1}"
 TTA_EPOCHS=7001
 NUM_FOLDS=20
 
@@ -116,7 +117,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     python tta_testing.py \
         --model-paths fold${i}:${FOLD_DIR} \
         --use-multi-gpu \
-        --gpu-ids 0 1 \
+        --gpu-ids ${GPU_IDS} \
         --support-sizes ${SUPPORT_SIZES} \
         --max-adapt-sessions 20 \
         --tta-epochs ${TTA_EPOCHS} \

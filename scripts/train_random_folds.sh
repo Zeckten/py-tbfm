@@ -12,7 +12,7 @@ if [ -n "$SESSIONS_FILE" ] && [ ! -f "$SESSIONS_FILE" ]; then
 fi
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-OUTPUT_BASE="random_folds_${TIMESTAMP}"
+OUTPUT_BASE="${OUTPUT_BASE:-random_folds_${TIMESTAMP}}"
 
 echo "Starting random folds training at ${TIMESTAMP}"
 if [ -n "$SESSIONS_FILE" ]; then
@@ -45,17 +45,17 @@ LATENT_DIM=96
 NUM_BASES=100
 TRAIN_SIZE=5000
 BATCH_SIZE=500
+NUM_GPUS="${NUM_GPUS:-2}"
 
 # Track PIDs and start times for each GPU
 declare -A GPU_PIDS
 declare -A FOLD_START_TIMES
 declare -A FOLD_GPUS
-GPU_PIDS[0]=""
-GPU_PIDS[1]=""
+for _g in $(seq 0 $((NUM_GPUS - 1))); do GPU_PIDS[$_g]=""; done
 
-# Train models for each fold using both GPUs (2 at a time max)
+# Train models for each fold, NUM_GPUS at a time
 for i in $(seq 0 $((NUM_FOLDS - 1))); do
-    GPU_ID=$((i % 2))
+    GPU_ID=$((i % NUM_GPUS))
 
     # Wait for the specific GPU to be free if it's occupied
     if [ -n "${GPU_PIDS[$GPU_ID]}" ]; then
@@ -195,28 +195,29 @@ done
 echo "Waiting for all remaining training jobs to complete..."
 echo "" >> ${TIMING_LOG}
 
-# Process completion of final GPU 0 job if it exists
-if [ -n "${GPU_PIDS[0]}" ]; then
-    FOLD=${FOLD_GPUS[0]}
-    wait ${GPU_PIDS[0]}
-    EXIT_CODE=$?
-    END_TIME=$(date +%s)
-    START_TIME=${FOLD_START_TIMES[$FOLD]}
-    DURATION=$((END_TIME - START_TIME))
-    END_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+# Process completion of any remaining jobs on each GPU
+for GPU_ID in $(seq 0 $((NUM_GPUS - 1))); do
+    if [ -n "${GPU_PIDS[$GPU_ID]}" ]; then
+        FOLD=${FOLD_GPUS[$GPU_ID]}
+        wait ${GPU_PIDS[$GPU_ID]}
+        EXIT_CODE=$?
+        END_TIME=$(date +%s)
+        START_TIME=${FOLD_START_TIMES[$FOLD]}
+        DURATION=$((END_TIME - START_TIME))
+        END_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-    if [ ${EXIT_CODE} -ne 0 ]; then
-        echo "ERROR: Training failed for fold ${FOLD}"
-        echo "Fold ${FOLD}: FAILED at ${END_TIMESTAMP}" >> ${TIMING_LOG}
-        echo "${FOLD},${FOLD},$(date -d @${START_TIME} +%Y%m%d_%H%M%S),${END_TIMESTAMP},${DURATION},NA,NA,FAILED" >> ${METRICS_LOG}
-        exit 1
-    fi
+        if [ ${EXIT_CODE} -ne 0 ]; then
+            echo "ERROR: Training failed for fold ${FOLD}"
+            echo "Fold ${FOLD}: FAILED at ${END_TIMESTAMP}" >> ${TIMING_LOG}
+            echo "${FOLD},${FOLD},$(date -d @${START_TIME} +%Y%m%d_%H%M%S),${END_TIMESTAMP},${DURATION},NA,NA,FAILED" >> ${METRICS_LOG}
+            exit 1
+        fi
 
-    OUT_DIR="${OUTPUT_BASE}/fold${FOLD}"
-    TRAIN_R2="NA"
-    TEST_R2="NA"
-    if [ -f "${OUT_DIR}/results.pkl" ]; then
-        METRICS=$(python -c "
+        OUT_DIR="${OUTPUT_BASE}/fold${FOLD}"
+        TRAIN_R2="NA"
+        TEST_R2="NA"
+        if [ -f "${OUT_DIR}/results.pkl" ]; then
+            METRICS=$(python -c "
 import pickle
 try:
     with open('${OUT_DIR}/results.pkl', 'rb') as f:
@@ -227,53 +228,14 @@ try:
 except:
     print('NA,NA')
 " 2>/dev/null)
-        TRAIN_R2=$(echo $METRICS | cut -d',' -f1)
-        TEST_R2=$(echo $METRICS | cut -d',' -f2)
+            TRAIN_R2=$(echo $METRICS | cut -d',' -f1)
+            TEST_R2=$(echo $METRICS | cut -d',' -f2)
+        fi
+
+        echo "Fold ${FOLD}: COMPLETED at ${END_TIMESTAMP} (duration: ${DURATION}s, train_r2: ${TRAIN_R2}, test_r2: ${TEST_R2})" >> ${TIMING_LOG}
+        echo "${FOLD},${FOLD},$(date -d @${START_TIME} +%Y%m%d_%H%M%S),${END_TIMESTAMP},${DURATION},${TRAIN_R2},${TEST_R2},SUCCESS" >> ${METRICS_LOG}
     fi
-
-    echo "Fold ${FOLD}: COMPLETED at ${END_TIMESTAMP} (duration: ${DURATION}s, train_r2: ${TRAIN_R2}, test_r2: ${TEST_R2})" >> ${TIMING_LOG}
-    echo "${FOLD},${FOLD},$(date -d @${START_TIME} +%Y%m%d_%H%M%S),${END_TIMESTAMP},${DURATION},${TRAIN_R2},${TEST_R2},SUCCESS" >> ${METRICS_LOG}
-fi
-
-# Process completion of final GPU 1 job if it exists
-if [ -n "${GPU_PIDS[1]}" ]; then
-    FOLD=${FOLD_GPUS[1]}
-    wait ${GPU_PIDS[1]}
-    EXIT_CODE=$?
-    END_TIME=$(date +%s)
-    START_TIME=${FOLD_START_TIMES[$FOLD]}
-    DURATION=$((END_TIME - START_TIME))
-    END_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-
-    if [ ${EXIT_CODE} -ne 0 ]; then
-        echo "ERROR: Training failed for fold ${FOLD}"
-        echo "Fold ${FOLD}: FAILED at ${END_TIMESTAMP}" >> ${TIMING_LOG}
-        echo "${FOLD},${FOLD},$(date -d @${START_TIME} +%Y%m%d_%H%M%S),${END_TIMESTAMP},${DURATION},NA,NA,FAILED" >> ${METRICS_LOG}
-        exit 1
-    fi
-
-    OUT_DIR="${OUTPUT_BASE}/fold${FOLD}"
-    TRAIN_R2="NA"
-    TEST_R2="NA"
-    if [ -f "${OUT_DIR}/results.pkl" ]; then
-        METRICS=$(python -c "
-import pickle
-try:
-    with open('${OUT_DIR}/results.pkl', 'rb') as f:
-        results = pickle.load(f)
-    train_r2 = results.get('train_r2s', [[None, 'NA']])[-1][1]
-    test_r2 = results.get('test_r2s', [[None, 'NA']])[-1][1]
-    print(f'{train_r2},{test_r2}')
-except:
-    print('NA,NA')
-" 2>/dev/null)
-        TRAIN_R2=$(echo $METRICS | cut -d',' -f1)
-        TEST_R2=$(echo $METRICS | cut -d',' -f2)
-    fi
-
-    echo "Fold ${FOLD}: COMPLETED at ${END_TIMESTAMP} (duration: ${DURATION}s, train_r2: ${TRAIN_R2}, test_r2: ${TEST_R2})" >> ${TIMING_LOG}
-    echo "${FOLD},${FOLD},$(date -d @${START_TIME} +%Y%m%d_%H%M%S),${END_TIMESTAMP},${DURATION},${TRAIN_R2},${TEST_R2},SUCCESS" >> ${METRICS_LOG}
-fi
+done
 
 echo "All training jobs completed successfully"
 COMPLETION_TIMESTAMP=$(date +%Y%m%d_%H%M%S)
