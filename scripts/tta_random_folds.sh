@@ -122,7 +122,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     fi
 
     # Run TTA for this fold on all held-out sessions
-    # The script will automatically determine held-out sessions based on hisi file
+    # Use `&&/||` guard so set -e doesn't trigger before EXIT_CODE is captured
     python tta_testing.py \
         --model-paths fold${i}:${MODEL_PATH} \
         --use-multi-gpu \
@@ -133,9 +133,8 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         --output-dir ${FOLD_TTA_DIR} \
         --unfreeze-bases \
         --progressive-unfreezing-threshold 0 \
-        --no-plot-display
-
-    EXIT_CODE=$?
+        --no-plot-display \
+        && EXIT_CODE=0 || EXIT_CODE=$?
     FOLD_END=$(date +%s)
     FOLD_DURATION=$((FOLD_END - FOLD_START))
     FOLD_END_TS=$(date +%Y%m%d_%H%M%S)
