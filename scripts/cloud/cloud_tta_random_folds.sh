@@ -36,6 +36,7 @@ echo "============================================================"
 MODEL_SRC="gs://${BUCKET}/models/${FOLDS_DIR}/"
 if [ ! -d "${FOLDS_DIR}/fold0" ]; then
     echo "Syncing fold models from ${MODEL_SRC}..."
+    mkdir -p "${FOLDS_DIR}"
     gsutil -m rsync -r "${MODEL_SRC}" "${FOLDS_DIR}/"
 else
     echo "Fold models already present, skipping model sync."

@@ -40,7 +40,7 @@ case "${GPU_FAMILY}" in
         ;;
     rtx-pro-6000|pro6000|rtx)
         # g4-standard-* machine family — RTX PRO 6000 (Blackwell, 96GB VRAM each).
-        # g4 boot disks must be pd-ssd or hyperdisk (no pd-balanced).
+        # g4 boot disks must be hyperdisk-balanced (pd-ssd and pd-balanced unsupported).
         case "${GPU_COUNT}" in
             1) MACHINE_TYPE="g4-standard-48"; LOCAL_SSD_COUNT=0 ;;
             2) MACHINE_TYPE="g4-standard-96"; LOCAL_SSD_COUNT=0 ;;
@@ -49,7 +49,7 @@ case "${GPU_FAMILY}" in
             *) echo "ERROR: rtx-pro-6000 gpu-count must be 1, 2, 4, or 8 (got ${GPU_COUNT})" >&2; exit 1 ;;
         esac
         GPU_LABEL="RTX PRO 6000"
-        BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-pd-ssd}"
+        BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-hyperdisk-balanced}"
         ;;
     l4)
         # g2-standard-* machine family — NVIDIA L4 (Ada, 24GB VRAM each).
