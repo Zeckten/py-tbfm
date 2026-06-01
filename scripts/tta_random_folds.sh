@@ -140,7 +140,37 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     FOLD_DURATION=$((FOLD_END - FOLD_START))
     FOLD_END_TS=$(date +%Y%m%d_%H%M%S)
 
-    if [ ${EXIT_CODE} -ne 0 ]; then
+    # If tta_testing.py exited non-zero but adapted_models exist, reconstruct
+    # the results JSON so the fold isn't re-run on next invocation.
+    if [ ${EXIT_CODE} -ne 0 ] && [ -d "${FOLD_TTA_DIR}/adapted_models" ]; then
+        echo "TTA exited non-zero for fold ${i} but adapted_models exist — reconstructing JSON"
+        python -c "
+import torch, json, math
+from pathlib import Path
+BASE = Path('${FOLD_TTA_DIR}')
+am = BASE / 'adapted_models'
+runs = []
+for sd in sorted(am.glob('*_support*')):
+    sup = int(sd.name.split('support')[1].split('_')[0])
+    ps, finals = {}, []
+    for s in sorted(sd.iterdir()):
+        m = s / 'metadata.torch'
+        if m.exists():
+            d = torch.load(m, weights_only=False)
+            ps.update(d.get('per_session_r2s', {}))
+            finals.append(d.get('final_r2', float('nan')))
+    if ps:
+        v = [x for x in finals if not math.isnan(float(x))]
+        runs.append({'model': 'fold${i}', 'strategy': 'inner_outer', 'support_size': sup,
+                     'r2': float(sum(v)/len(v)) if v else None, 'per_session_r2s': {k: float(val) for k,val in ps.items()}})
+if runs:
+    out = BASE / 'tta_support_reconstructed.json'
+    json.dump({'runs': runs}, open(out,'w'))
+    print('Reconstructed:', out)
+" 2>/dev/null || true
+    fi
+
+    if [ ${EXIT_CODE} -ne 0 ] && ! ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1; then
         echo "ERROR: TTA failed for fold ${i}"
         echo "Fold ${i}: FAILED at ${FOLD_END_TS} (duration: ${FOLD_DURATION}s)" >> ${TIMING_LOG}
 

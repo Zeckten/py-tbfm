@@ -2578,9 +2578,21 @@ def run_tta_sweep(
 
 
 def _sanitize_for_json(obj):
-    """Replace nan/inf with None so json.dump never raises on bad R² values."""
+    """Replace nan/inf/numpy scalars with JSON-safe equivalents."""
+    import math
+    # numpy scalars — convert to Python native before further checks
+    try:
+        import numpy as np
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            v = float(obj)
+            return None if (math.isnan(v) or math.isinf(v)) else v
+        if isinstance(obj, np.ndarray):
+            return [_sanitize_for_json(x) for x in obj.tolist()]
+    except ImportError:
+        pass
     if isinstance(obj, float):
-        import math
         return None if (math.isnan(obj) or math.isinf(obj)) else obj
     if isinstance(obj, dict):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
