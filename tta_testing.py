@@ -2985,4 +2985,10 @@ def _main_impl(args):
 
 
 if __name__ == "__main__":
-    main()
+    import traceback, sys
+    try:
+        main()
+    except Exception as e:
+        print(f"\nFATAL ERROR in tta_testing.py: {e}", file=sys.stderr)
+        traceback.print_exc()
+        sys.exit(1)
