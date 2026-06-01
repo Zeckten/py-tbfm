@@ -50,12 +50,23 @@ fi
 TIMING_LOG="${TTA_OUTPUT_DIR}/tta_timing_log.txt"
 RESULTS_SUMMARY="${TTA_OUTPUT_DIR}/tta_summary.csv"
 
-echo "TTA Cross-Validation Log" > ${TIMING_LOG}
-echo "Started at: ${TIMESTAMP}" >> ${TIMING_LOG}
-echo "========================================" >> ${TIMING_LOG}
-echo "" >> ${TIMING_LOG}
+# Append on resume; create fresh otherwise
+if [ -n "$RESUME_DIR" ] && [ -f "${TIMING_LOG}" ]; then
+    echo "" >> ${TIMING_LOG}
+    echo "--- Resumed at: ${TIMESTAMP} ---" >> ${TIMING_LOG}
+else
+    echo "TTA Cross-Validation Log" > ${TIMING_LOG}
+    echo "Started at: ${TIMESTAMP}" >> ${TIMING_LOG}
+    echo "========================================" >> ${TIMING_LOG}
+    echo "" >> ${TIMING_LOG}
+fi
 
-echo "fold,session_id,strategy,support_size,r2,start_time,end_time,duration_sec,status" > ${RESULTS_SUMMARY}
+# Append summary rows on resume
+if [ -n "$RESUME_DIR" ] && [ -f "${RESULTS_SUMMARY}" ]; then
+    true  # keep existing rows
+else
+    echo "fold,session_id,strategy,support_size,r2,start_time,end_time,duration_sec,status" > ${RESULTS_SUMMARY}
+fi
 
 
 # Count available folds
