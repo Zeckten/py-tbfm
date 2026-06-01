@@ -68,11 +68,14 @@ fi
 echo "=TTA="
 TTA_DIR=$(ls -dt "${OUTPUT_DIR}"/tta_results_* 2>/dev/null | head -1 || true)
 TTA_LOG="${TTA_DIR}/tta_timing_log.txt"
-if [ -n "$TTA_DIR" ] && [ -f "$TTA_LOG" ]; then
-    TDONE=$(grep -c "COMPLETED" "$TTA_LOG" 2>/dev/null || true); TDONE=${TDONE:-0}
-    TFAIL=$(grep -c "FAILED"    "$TTA_LOG" 2>/dev/null || true); TFAIL=${TFAIL:-0}
+if [ -n "$TTA_DIR" ]; then
+    # Count by JSON files on disk — ground truth regardless of timing log state
+    TDONE=$(ls "${TTA_DIR}"/fold*/tta_support_*.json 2>/dev/null | \
+            awk -F'/' '{print $(NF-1)}' | sort -u | wc -l || true); TDONE=${TDONE:-0}
+    TFAIL=$(grep -c "FAILED" "$TTA_LOG" 2>/dev/null || true); TFAIL=${TFAIL:-0}
     printf "done=%s fail=%s dir=%s\n" "$TDONE" "$TFAIL" "$TTA_DIR"
-    grep -E "STARTED|COMPLETED|FAILED" "$TTA_LOG" | tail -2
+    grep -E "STARTED|COMPLETED|FAILED" "$TTA_LOG" 2>/dev/null | tail -2 || \
+        grep "Processing Fold\|TTA jobs:" /tmp/tta.log 2>/dev/null | tail -2 || true
 else
     printf "done=0 fail=0 dir=%s\n" "${TTA_DIR}"
     grep "Processing Fold\|TTA jobs:" /tmp/tta.log 2>/dev/null | tail -2 || echo "(not started)"
