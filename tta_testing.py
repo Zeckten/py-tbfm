@@ -2954,6 +2954,7 @@ def _main_impl(args):
                 )
 
     # Update metadata to reflect all sessions
+    print(f"Aggregation complete, {len(results.get('runs', []))} runs. Saving...")
     results["metadata"]["adapt_session_ids"] = adapt_session_ids
 
     print(f"Aggregation complete, {len(results.get('runs', []))} runs. Saving...")
