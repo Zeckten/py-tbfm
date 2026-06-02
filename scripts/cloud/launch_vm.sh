@@ -93,7 +93,7 @@ if [ "${DATA_DISK_MODE}" = "rw" ]; then
 else
     mount -o ro,noload /dev/disk/by-id/google-${DATA_DISK} /mnt/data
 fi
-chmod 755 /mnt/data
+chmod 755 /mnt/data || true
 
 # Refresh repo to branch tip.
 cd /opt/py-tbfm
@@ -128,7 +128,7 @@ if [ -e /dev/nvme0n1 ] && ! findmnt -n / | grep -q nvme0n1 \\
 fi
 # If we didn't get a separate disk mounted, /mnt/data is on the boot disk.
 mkdir -p /mnt/data
-chmod 777 /mnt/data
+chmod 777 /mnt/data || true
 gsutil -m rsync -r gs://${BUCKET}/data/ /mnt/data/
 
 cd /opt/py-tbfm
