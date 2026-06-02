@@ -10,6 +10,7 @@
 #   BUCKET        required
 #   FOLDS_DIR     required — name of the fold output dir (not a full path)
 #   GPU_IDS       default "0 1 2 3 4 5 6 7"
+#   FOLD_ORDER    default "forward" — set "reverse" for backward sweep
 #   AUTO_SHUTDOWN default stop
 
 set -euo pipefail
@@ -17,6 +18,7 @@ set -euo pipefail
 BUCKET="${BUCKET:?BUCKET env var required}"
 FOLDS_DIR="${FOLDS_DIR:?FOLDS_DIR env var required}"
 GPU_IDS="${GPU_IDS:-0 1 2 3 4 5 6 7}"
+FOLD_ORDER="${FOLD_ORDER:-forward}"
 AUTO_SHUTDOWN="${AUTO_SHUTDOWN:-stop}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -26,10 +28,11 @@ cd "${REPO_ROOT}"
 
 echo "============================================================"
 echo "Random folds TTA"
-echo "  folds dir: ${FOLDS_DIR}"
-echo "  gpu ids:   ${GPU_IDS}"
-echo "  data dir:  ${TBFM_DATA_DIR}"
-echo "  bucket:    gs://${BUCKET}"
+echo "  folds dir:  ${FOLDS_DIR}"
+echo "  fold order: ${FOLD_ORDER}"
+echo "  gpu ids:    ${GPU_IDS}"
+echo "  data dir:   ${TBFM_DATA_DIR}"
+echo "  bucket:     gs://${BUCKET}"
 echo "============================================================"
 
 # Pull trained fold models from GCS if not already present
@@ -42,10 +45,9 @@ else
     echo "Fold models already present, skipping model sync."
 fi
 
-# Pull any prior TTA results so completed folds are skipped on resume
-TTA_SRC="gs://${BUCKET}/results/incremental/$(hostname)/"
-PRIOR_TTA=$(gsutil ls "gs://${BUCKET}/results/incremental/" 2>/dev/null \
-    | grep "${FOLDS_DIR}/tta_results" | head -1 || true)
+# Pull prior TTA results from the shared models path (covers results from any VM)
+PRIOR_TTA=$(gsutil ls "gs://${BUCKET}/models/${FOLDS_DIR}/" 2>/dev/null \
+    | grep "tta_results" | sort | tail -1 || true)
 if [ -n "${PRIOR_TTA}" ]; then
     TTA_DEST_NAME=$(basename "${PRIOR_TTA%/}")
     echo "Syncing prior TTA results from ${PRIOR_TTA}..."
@@ -68,7 +70,7 @@ WATCH_DIR="${TTA_RESULTS_DIR:-${FOLDS_DIR}/tta_results_pending}"
 echo ""
 echo "Starting TTA..."
 
-GPU_IDS="${GPU_IDS}" \
+GPU_IDS="${GPU_IDS}" FOLD_ORDER="${FOLD_ORDER}" \
 BUCKET="${BUCKET}" bash "${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh" \
     "${WATCH_DIR}" \
     bash scripts/tta_random_folds.sh "${FOLDS_DIR}" ${RESUME_ARG}

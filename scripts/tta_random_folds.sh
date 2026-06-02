@@ -31,6 +31,7 @@ SUPPORT_SIZES="${SUPPORT_SIZES:-500 1000 2500 5000}"
 GPU_IDS="${GPU_IDS:-0 1}"
 TTA_EPOCHS=7001
 NUM_FOLDS=20
+FOLD_ORDER="${FOLD_ORDER:-forward}"
 
 # Create or reuse TTA output directory
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -85,7 +86,12 @@ echo "Output directory: ${TTA_OUTPUT_DIR}"
 echo ""
 
 # Process each fold
-for i in $(seq 0 $((NUM_FOLDS - 1))); do
+if [ "$FOLD_ORDER" = "reverse" ]; then
+    FOLD_SEQ=$(seq $((NUM_FOLDS - 1)) -1 0)
+else
+    FOLD_SEQ=$(seq 0 $((NUM_FOLDS - 1)))
+fi
+for i in $FOLD_SEQ; do
     FOLD_DIR="${FOLDS_DIR}/fold${i}"
 
     if [ ! -d "$FOLD_DIR" ]; then
