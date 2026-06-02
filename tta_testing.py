@@ -108,16 +108,6 @@ def parse_args():
         help="Number of inner steps for inner-outer TTA strategy",
     )
     parser.add_argument(
-        "--tta-final-inner-steps",
-        type=int,
-        default=None,
-        help=(
-            "Number of inner steps for the final embedding convergence pass after AE adaptation. "
-            "Defaults to --tta-epochs (full convergence). "
-            "Set to --tta-inner-steps (e.g. 20) to match experiments-branch behaviour."
-        ),
-    )
-    parser.add_argument(
         "--batch-size-per-session",
         type=int,
         default=7500,
@@ -259,7 +249,7 @@ def parse_args():
         "--lambda-l2",
         type=float,
         default=None,
-        help="Override cfg.meta.training.stim_embedding_lambda_l2 at TTA time",
+        help="Override cfg.meta.training.lambda_l2 at TTA time",
     )
     parser.add_argument(
         "--lambda-ortho",
@@ -1349,6 +1339,7 @@ def train_vanilla_tbfm(
     Returns:
         Tuple of (final_test_r2, per_session_r2s_dict)
     """
+    from torcheval.metrics.functional import r2_score
     from tbfm import tbfm as tbfm_module
 
     if not quiet:
@@ -1457,7 +1448,7 @@ def train_vanilla_tbfm(
                 y_test_norm = _tbfm.normalize(y_test)
 
                 y_pred_test = _tbfm(runway_test, stiminds_test)
-                test_r2 = utils.r2_score(y_pred_test.flatten(), y_test_norm.flatten())
+                test_r2 = r2_score(y_pred_test.flatten(), y_test_norm.flatten())
 
                 test_r2_acc += test_r2.item()
                 test_batch_count += 1
@@ -1520,6 +1511,8 @@ def train_fresh_tbfm_no_multisession(
     Returns:
         Tuple of (final_test_r2, per_session_r2s_dict)
     """
+    from torcheval.metrics.functional import r2_score
+
     if not quiet:
         print("Training fresh TBFM (per-session, no multisession) on support set...")
 
@@ -1614,7 +1607,9 @@ def train_fresh_tbfm_no_multisession(
                 y_test_norm = _tbfm.normalize(y_test)
                 y_pred_test = _tbfm(runway_test, stiminds_test)
 
-                test_r2 = utils.r2_score(y_pred_test.flatten(), y_test_norm.flatten())
+                from torcheval.metrics.functional import r2_score
+
+                test_r2 = r2_score(y_pred_test.flatten(), y_test_norm.flatten())
                 test_r2_acc += test_r2.item()
                 test_batch_count += 1
 
@@ -2580,7 +2575,6 @@ def run_tta_sweep(
 def _sanitize_for_json(obj):
     """Replace nan/inf/numpy scalars with JSON-safe equivalents."""
     import math
-    # numpy scalars — convert to Python native before further checks
     try:
         import numpy as np
         if isinstance(obj, np.integer):
@@ -2954,7 +2948,6 @@ def _main_impl(args):
                 )
 
     # Update metadata to reflect all sessions
-    print(f"Aggregation complete, {len(results.get('runs', []))} runs. Saving...")
     results["metadata"]["adapt_session_ids"] = adapt_session_ids
 
     print(f"Aggregation complete, {len(results.get('runs', []))} runs. Saving...")
@@ -2986,10 +2979,4 @@ def _main_impl(args):
 
 
 if __name__ == "__main__":
-    import traceback, sys
-    try:
-        main()
-    except Exception as e:
-        print(f"\nFATAL ERROR in tta_testing.py: {e}", file=sys.stderr)
-        traceback.print_exc()
-        sys.exit(1)
+    main()
