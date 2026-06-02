@@ -64,7 +64,7 @@ RESUME_DIR="${TTA_DIR}"
 
 tmux kill-session -t run 2>/dev/null || true
 tmux new-session -d -s run -x 220 -y 50 \
-    "TBFM_DATA_DIR=/mnt/data GPU_IDS='0 1 2 3 4 5 6 7' BUCKET=${BUCKET} \
+    "source /opt/py-tbfm/.venv/bin/activate && PYTHON_BIN=/opt/py-tbfm/.venv/bin/python TBFM_DATA_DIR=/mnt/data GPU_IDS='0 1 2 3 4 5 6 7' BUCKET=${BUCKET} \
     bash scripts/cloud/with_incremental_rsync.sh \
         '${RESUME_DIR}' \
         bash scripts/tta_random_folds.sh '${FOLDS_DIR}' '${RESUME_DIR}' \
