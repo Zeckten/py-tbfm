@@ -108,8 +108,12 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
 
     # Check if this fold was already completed (output directory exists with results)
     FOLD_TTA_DIR="${TTA_OUTPUT_DIR}/fold${i}"
-    if [ -d "$FOLD_TTA_DIR" ] && ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1; then
-        echo "Fold ${i} already completed (results found in ${FOLD_TTA_DIR}), skipping..."
+    _n_sup=$(echo "${SUPPORT_SIZES}" | wc -w)
+    _expected_jobs=$(( 20 * _n_sup ))
+    _jobs_done=$(find "${FOLD_TTA_DIR}/adapted_models" -name "metadata.torch" 2>/dev/null | wc -l)
+    if [ -d "$FOLD_TTA_DIR" ] && \
+        { ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1 || [ "$_jobs_done" -ge "$_expected_jobs" ]; }; then
+        echo "Fold ${i} already completed (${_jobs_done}/${_expected_jobs} jobs, results in ${FOLD_TTA_DIR}), skipping..."
         continue
     fi
 
