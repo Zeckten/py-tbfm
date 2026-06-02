@@ -205,7 +205,7 @@ if runs:
         echo "  Extracting results from: $(basename $RESULTS_JSON)"
 
         # Parse JSON and extract per-session R² scores
-        python -c "
+        ${PYTHON_BIN:-python} -c "
 import json
 import sys
 
@@ -229,11 +229,7 @@ try:
 except Exception as e:
     print(f'ERROR: Failed to parse results: {e}', file=sys.stderr)
     sys.exit(1)
-" >> ${RESULTS_SUMMARY}
-
-        if [ $? -ne 0 ]; then
-            echo "  WARNING: Failed to extract per-session results"
-        fi
+" >> ${RESULTS_SUMMARY} || echo "  WARNING: Failed to extract per-session results"
     else
         echo "  WARNING: No results JSON file found"
         echo "${i},ALL,ALL,ALL,NA,${FOLD_START_TS},${FOLD_END_TS},${FOLD_DURATION},NO_RESULTS" >> ${RESULTS_SUMMARY}
