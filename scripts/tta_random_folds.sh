@@ -154,7 +154,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     # Covers both non-zero exit and silent failures (exit 0 but no JSON written).
     if [ -d "${FOLD_TTA_DIR}/adapted_models" ] && ! ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1; then
         echo "No results JSON for fold ${i} — reconstructing from adapted_models"
-        python -c "
+        ${PYTHON_BIN:-python} -c "
 import torch, json, math
 from pathlib import Path
 BASE = Path('${FOLD_TTA_DIR}')
