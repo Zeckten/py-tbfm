@@ -162,10 +162,7 @@ gcloud compute instances create "${VM_NAME}" \
     --machine-type="${MACHINE_TYPE}" \
     --provisioning-model=SPOT \
     --instance-termination-action=DELETE \
-    --image-family="${IMAGE_FAMILY}" \
-    --image-project="${PROJECT}" \
-    --boot-disk-size="${BOOT_DISK_GB}GB" \
-    --boot-disk-type="${BOOT_DISK_TYPE}" \
+    --create-disk="auto-delete=yes,boot=yes,device-name=boot,image-family=${IMAGE_FAMILY},image-project=${PROJECT},size=${BOOT_DISK_GB},type=${BOOT_DISK_TYPE}" \
     $(for _ in $(seq 1 ${LOCAL_SSD_COUNT}); do echo --local-ssd=interface=NVME; done) \
     ${DISK_FLAG} \
     --metadata="install-nvidia-driver=False" \
