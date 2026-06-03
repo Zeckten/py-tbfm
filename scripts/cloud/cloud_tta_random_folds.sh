@@ -45,9 +45,16 @@ else
     echo "Fold models already present, skipping model sync."
 fi
 
-# Pull prior TTA results from the shared models path (covers results from any VM)
+# Pull prior TTA results — check models path first, then all incremental VM paths
 PRIOR_TTA=$(gsutil ls "gs://${BUCKET}/models/${FOLDS_DIR}/" 2>/dev/null \
     | grep "tta_results" | sort | tail -1 || true)
+if [ -z "${PRIOR_TTA}" ]; then
+    # Fall back to incremental paths from any prior VM
+    PRIOR_TTA=$(gsutil ls "gs://${BUCKET}/results/incremental/" 2>/dev/null \
+        | while read vm_path; do
+            gsutil ls "${vm_path}" 2>/dev/null | grep "tta_results" | head -1
+          done | grep "${FOLDS_DIR}" | sort | tail -1 || true)
+fi
 if [ -n "${PRIOR_TTA}" ]; then
     TTA_DEST_NAME=$(basename "${PRIOR_TTA%/}")
     echo "Syncing prior TTA results from ${PRIOR_TTA}..."
