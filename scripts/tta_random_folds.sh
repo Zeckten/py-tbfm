@@ -112,8 +112,17 @@ for i in $FOLD_SEQ; do
         continue
     fi
 
-    # Check if this fold was already completed (output directory exists with results)
+    # Pull latest fold results from GCS so we see work done by other VMs
     FOLD_TTA_DIR="${TTA_OUTPUT_DIR}/fold${i}"
+    if [ -n "${BUCKET:-}" ]; then
+        _gcs_fold="gs://${BUCKET}/results/incremental/"
+        for _vm_path in $(gsutil ls "${_gcs_fold}" 2>/dev/null); do
+            _src="${_vm_path}$(basename ${TTA_OUTPUT_DIR})/fold${i}/"
+            gsutil -m rsync -r "${_src}" "${FOLD_TTA_DIR}/" 2>/dev/null || true
+        done
+    fi
+
+    # Check if this fold was already completed (output directory exists with results)
     _n_sup=$(echo "${SUPPORT_SIZES}" | wc -w)
     _expected_jobs=$(( 20 * _n_sup ))
     _jobs_done=$(find "${FOLD_TTA_DIR}/adapted_models" -name "metadata.torch" 2>/dev/null | wc -l)
