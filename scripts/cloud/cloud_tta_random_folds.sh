@@ -19,6 +19,7 @@ BUCKET="${BUCKET:?BUCKET env var required}"
 FOLDS_DIR="${FOLDS_DIR:?FOLDS_DIR env var required}"
 GPU_IDS="${GPU_IDS:-0 1 2 3 4 5 6 7}"
 FOLD_ORDER="${FOLD_ORDER:-forward}"
+SKIP_IN_PROGRESS="${SKIP_IN_PROGRESS:-0}"
 AUTO_SHUTDOWN="${AUTO_SHUTDOWN:-stop}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -77,7 +78,7 @@ WATCH_DIR="${TTA_RESULTS_DIR:-${FOLDS_DIR}/tta_results_pending}"
 echo ""
 echo "Starting TTA..."
 
-GPU_IDS="${GPU_IDS}" FOLD_ORDER="${FOLD_ORDER}" \
+GPU_IDS="${GPU_IDS}" FOLD_ORDER="${FOLD_ORDER}" SKIP_IN_PROGRESS="${SKIP_IN_PROGRESS}" \
 BUCKET="${BUCKET}" bash "${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh" \
     "${WATCH_DIR}" \
     bash scripts/tta_random_folds.sh "${FOLDS_DIR}" ${RESUME_ARG}
