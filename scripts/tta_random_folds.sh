@@ -124,11 +124,15 @@ for i in $FOLD_SEQ; do
         _gcs_json=$(gsutil ls "gs://${BUCKET}/results/incremental/*/${_tta_name}/fold${i}/tta_support_*.json" 2>/dev/null | wc -l)
         _gcs_jobs=$(gsutil ls "gs://${BUCKET}/results/incremental/*/${_tta_name}/fold${i}/adapted_models/**/metadata.torch" 2>/dev/null | wc -l)
     fi
-    if { ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1 \
+    _skip=0
+    { ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1 \
         || [ "$_jobs_done" -ge "$_expected_jobs" ] \
         || [ "$_gcs_json" -gt 0 ] \
-        || [ "$_gcs_jobs" -ge "$_expected_jobs" ]; }; then
-        echo "Fold ${i} already completed (local_jobs=${_jobs_done} gcs_jobs=${_gcs_jobs} gcs_json=${_gcs_json}), skipping..."
+        || [ "$_gcs_jobs" -ge "$_expected_jobs" ]; } && _skip=1
+    # Also skip partially-done folds when SKIP_IN_PROGRESS=1
+    [ "${SKIP_IN_PROGRESS:-0}" = "1" ] && [ "$_gcs_jobs" -gt 0 ] && _skip=1
+    if [ "$_skip" -eq 1 ]; then
+        echo "Fold ${i} skipping (local_jobs=${_jobs_done} gcs_jobs=${_gcs_jobs} gcs_json=${_gcs_json})"
         continue
     fi
 
