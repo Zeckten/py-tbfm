@@ -24,7 +24,7 @@ BOOT_DISK_GB="${BOOT_DISK_GB:-200}"
 
 VM_NAME="${1:?usage: $0 <vm-name> <gpu-count> [gpu-family]}"
 GPU_COUNT="${2:?usage: $0 <vm-name> <gpu-count> [gpu-family]}"
-GPU_FAMILY="${3:-a100}"   # "a100" or "rtx-pro-6000"
+GPU_FAMILY="${3:-rtx}"   # "rtx" (RTX PRO 6000) or "a100"
 
 case "${GPU_FAMILY}" in
     a100)
