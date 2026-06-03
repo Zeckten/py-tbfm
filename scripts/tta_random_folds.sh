@@ -112,23 +112,23 @@ for i in $FOLD_SEQ; do
         continue
     fi
 
-    # Pull latest fold results from GCS so we see work done by other VMs
+    # Check if this fold was already completed — local or in any VM's GCS bucket
     FOLD_TTA_DIR="${TTA_OUTPUT_DIR}/fold${i}"
-    if [ -n "${BUCKET:-}" ]; then
-        _gcs_fold="gs://${BUCKET}/results/incremental/"
-        for _vm_path in $(gsutil ls "${_gcs_fold}" 2>/dev/null); do
-            _src="${_vm_path}$(basename ${TTA_OUTPUT_DIR})/fold${i}/"
-            gsutil -m rsync -r "${_src}" "${FOLD_TTA_DIR}/" 2>/dev/null || true
-        done
-    fi
-
-    # Check if this fold was already completed (output directory exists with results)
     _n_sup=$(echo "${SUPPORT_SIZES}" | wc -w)
     _expected_jobs=$(( 20 * _n_sup ))
     _jobs_done=$(find "${FOLD_TTA_DIR}/adapted_models" -name "metadata.torch" 2>/dev/null | wc -l)
-    if [ -d "$FOLD_TTA_DIR" ] && \
-        { ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1 || [ "$_jobs_done" -ge "$_expected_jobs" ]; }; then
-        echo "Fold ${i} already completed (${_jobs_done}/${_expected_jobs} jobs, results in ${FOLD_TTA_DIR}), skipping..."
+    _gcs_json=0
+    _gcs_jobs=0
+    if [ -n "${BUCKET:-}" ]; then
+        _tta_name=$(basename ${TTA_OUTPUT_DIR})
+        _gcs_json=$(gsutil ls "gs://${BUCKET}/results/incremental/*/${_tta_name}/fold${i}/tta_support_*.json" 2>/dev/null | wc -l)
+        _gcs_jobs=$(gsutil ls "gs://${BUCKET}/results/incremental/*/${_tta_name}/fold${i}/adapted_models/**/metadata.torch" 2>/dev/null | wc -l)
+    fi
+    if { ls ${FOLD_TTA_DIR}/tta_support_*.json 1>/dev/null 2>&1 \
+        || [ "$_jobs_done" -ge "$_expected_jobs" ] \
+        || [ "$_gcs_json" -gt 0 ] \
+        || [ "$_gcs_jobs" -ge "$_expected_jobs" ]; }; then
+        echo "Fold ${i} already completed (local_jobs=${_jobs_done} gcs_jobs=${_gcs_jobs} gcs_json=${_gcs_json}), skipping..."
         continue
     fi
 
