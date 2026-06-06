@@ -287,6 +287,11 @@ def parse_args():
         action="store_true",
         help="Force per-session processing (SESSION_GROUP_SIZE=1) without unfreezing",
     )
+    parser.add_argument(
+        "--allow-held-in",
+        action="store_true",
+        help="Allow TTA on held-in (training) sessions, bypassing the held-out-only check",
+    )
 
     return parser.parse_args()
 
@@ -862,7 +867,7 @@ def gpu_worker(
                 )
 
                 print(
-                    f"[GPU {gpu_id}] Completed: Model={model_key}, Support={support_size}, Strategy={strategy_key}, R²={final_r2:.4f}"
+                    f"[GPU {gpu_id}] Completed: Model={model_key}, Support={support_size}, Strategy={strategy_key}, R²={final_r2:.4f}, time={adapt_time_s:.1f}s"
                 )
 
                 # Send notification for TTA completion
@@ -1129,6 +1134,7 @@ def select_adapt_sessions(
     shared_held_out_sessions: List[str],
     max_sessions: int,
     specific_session: List[str] = None,
+    allow_held_in: bool = False,
 ) -> List[str]:
     """
     Select adaptation sessions from shared held-out sessions.
@@ -1150,10 +1156,11 @@ def select_adapt_sessions(
 
         # Validate all specified sessions
         for sid in session_list:
-            if sid not in shared_held_out_sessions:
+            if sid not in shared_held_out_sessions and not allow_held_in:
                 raise ValueError(
                     f"Specified session '{sid}' is not in shared held-out sessions.\n"
-                    f"Available sessions: {shared_held_out_sessions}"
+                    f"Available sessions: {shared_held_out_sessions}\n"
+                    f"Use --allow-held-in to bypass this check."
                 )
 
             path = os.path.join(DATA_DIR, sid, EMBEDDING_REST_SUBDIR, "er.torch")
@@ -1874,13 +1881,16 @@ def run_tta_sweep_multi_gpu(
                                 "per_session_r2s": per_session_r2s,
                                 "train_r2": final_train_r2,
                                 "per_session_train_r2s": per_session_train_r2s,
+                                "adapt_time_s": result.get("adapt_time_s"),
                             }
                         )
 
                         strategy_label = tta_strategies[strategy_key]["label"]
+                        adapt_time_s = result.get("adapt_time_s")
+                        time_str = f" | time={adapt_time_s:.1f}s" if adapt_time_s is not None else ""
                         log_line(
                             f"[GPU {gpu_id}] Complete | Strategy={strategy_label:<24} | "
-                            f"Support={support_size:>5} | Model={model_key:<20} | R²={final_r2:.4f}"
+                            f"Support={support_size:>5} | Model={model_key:<20} | R²={final_r2:.4f}{time_str}"
                         )
                     else:
                         log_line(
@@ -2854,7 +2864,8 @@ def _main_impl(args):
 
     # Select adaptation sessions
     adapt_session_ids = select_adapt_sessions(
-        shared_held_out_sessions, args.max_adapt_sessions, args.adapt_session
+        shared_held_out_sessions, args.max_adapt_sessions, args.adapt_session,
+        allow_held_in=args.allow_held_in,
     )
 
     # Determine session batch size based on progressive unfreezing
