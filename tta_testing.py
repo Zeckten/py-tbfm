@@ -108,6 +108,16 @@ def parse_args():
         help="Number of inner steps for inner-outer TTA strategy",
     )
     parser.add_argument(
+        "--tta-final-inner-steps",
+        type=int,
+        default=None,
+        help=(
+            "Number of inner steps for the final embedding convergence pass after AE adaptation. "
+            "Defaults to --tta-epochs (full convergence). "
+            "Set to --tta-inner-steps (e.g. 20) to match experiments-branch behaviour."
+        ),
+    )
+    parser.add_argument(
         "--batch-size-per-session",
         type=int,
         default=7500,
@@ -249,7 +259,7 @@ def parse_args():
         "--lambda-l2",
         type=float,
         default=None,
-        help="Override cfg.meta.training.lambda_l2 at TTA time",
+        help="Override cfg.meta.training.stim_embedding_lambda_l2 at TTA time",
     )
     parser.add_argument(
         "--lambda-ortho",
@@ -360,7 +370,7 @@ def apply_ablation_overrides(cfg, overrides: dict, log_prefix: str = ""):
         prev = cfg.meta.training.stim_embedding_lambda_l2
         cfg.meta.training.stim_embedding_lambda_l2 = float(overrides["lambda_l2"])
         print(
-            f"{log_prefix}[ABLATION]   lambda_l2: {prev} -> {cfg.meta.training.stim_embedding_lambda_l2}"
+            f"{log_prefix}[ABLATION]   stim_embedding_lambda_l2: {prev} -> {cfg.meta.training.stim_embedding_lambda_l2}"
         )
     if overrides.get("lambda_ortho") is not None:
         prev = cfg.tbfm.training.get("lambda_ortho", 0.0)
@@ -1339,7 +1349,6 @@ def train_vanilla_tbfm(
     Returns:
         Tuple of (final_test_r2, per_session_r2s_dict)
     """
-    from torcheval.metrics.functional import r2_score
     from tbfm import tbfm as tbfm_module
 
     if not quiet:
@@ -1448,7 +1457,7 @@ def train_vanilla_tbfm(
                 y_test_norm = _tbfm.normalize(y_test)
 
                 y_pred_test = _tbfm(runway_test, stiminds_test)
-                test_r2 = r2_score(y_pred_test.flatten(), y_test_norm.flatten())
+                test_r2 = utils.r2_score(y_pred_test.flatten(), y_test_norm.flatten())
 
                 test_r2_acc += test_r2.item()
                 test_batch_count += 1
@@ -1511,8 +1520,6 @@ def train_fresh_tbfm_no_multisession(
     Returns:
         Tuple of (final_test_r2, per_session_r2s_dict)
     """
-    from torcheval.metrics.functional import r2_score
-
     if not quiet:
         print("Training fresh TBFM (per-session, no multisession) on support set...")
 
@@ -1607,9 +1614,7 @@ def train_fresh_tbfm_no_multisession(
                 y_test_norm = _tbfm.normalize(y_test)
                 y_pred_test = _tbfm(runway_test, stiminds_test)
 
-                from torcheval.metrics.functional import r2_score
-
-                test_r2 = r2_score(y_pred_test.flatten(), y_test_norm.flatten())
+                test_r2 = utils.r2_score(y_pred_test.flatten(), y_test_norm.flatten())
                 test_r2_acc += test_r2.item()
                 test_batch_count += 1
 
@@ -2572,36 +2577,13 @@ def run_tta_sweep(
     }
 
 
-def _sanitize_for_json(obj):
-    """Replace nan/inf/numpy scalars with JSON-safe equivalents."""
-    import math
-    try:
-        import numpy as np
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            v = float(obj)
-            return None if (math.isnan(v) or math.isinf(v)) else v
-        if isinstance(obj, np.ndarray):
-            return [_sanitize_for_json(x) for x in obj.tolist()]
-    except ImportError:
-        pass
-    if isinstance(obj, float):
-        return None if (math.isnan(obj) or math.isinf(obj)) else obj
-    if isinstance(obj, dict):
-        return {k: _sanitize_for_json(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_sanitize_for_json(v) for v in obj]
-    return obj
-
-
 def save_results(results: Dict, output_dir: Path):
     """Save results to JSON file and per-session R² scores to CSV."""
     timestamp = results["metadata"]["timestamp"]
     json_path = output_dir / f"tta_support_{timestamp}.json"
 
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(_sanitize_for_json(results), f, indent=2)
+        json.dump(results, f, indent=2)
 
     print(f"Results saved to: {json_path}")
 
