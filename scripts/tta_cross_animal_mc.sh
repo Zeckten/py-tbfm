@@ -7,6 +7,8 @@
 
 set -euo pipefail
 
+export TBFM_DATA_DIR="${TBFM_DATA_DIR:-/mnt/data}"
+
 CROSS_ANIMAL_DIR="${1:-}"
 if [ -z "${CROSS_ANIMAL_DIR}" ]; then
     echo "Usage: $0 <cross_animal_mc_dir>"
