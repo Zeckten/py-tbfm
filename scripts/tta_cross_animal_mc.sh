@@ -52,7 +52,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     echo "=========================================="
 
     bash "${RETRY}" python -u tta_testing.py \
-        --model-paths "G_model:${G_MODEL}" "J_model:${J_MODEL}" \
+        --model-paths "G_model:${G_MODEL}/best" "J_model:${J_MODEL}/best" \
         --output-dir "${OUT_DIR}" \
         --cuda-device 0 \
         ${STANDARD_TTA_FLAGS} \
