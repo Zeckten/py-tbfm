@@ -88,15 +88,46 @@ for i in range(num_folds):
     def tta_status(d):
         if not d.exists():
             return \"waiting\"
-        jsons = list(d.rglob(\"*.json\"))
-        if jsons:
-            return f\"done ({len(jsons)} result files)\"
+        # Check sweep logs for per-job completion lines
+        sweep_logs = sorted(d.glob(\"tta_sweep_*.log\"))
+        if sweep_logs:
+            text = sweep_logs[-1].read_text()
+            lines = text.splitlines()
+            total = 0
+            for l in lines:
+                if l.startswith(\"Total TTA jobs:\"):
+                    try: total = int(l.split(\":\")[1].strip())
+                    except: pass
+            complete_lines = [l for l in lines if \"] Complete |\" in l]
+            done = len(complete_lines)
+            if total > 0 and done >= total:
+                # summarise final r2s
+                r2s = []
+                for l in complete_lines:
+                    if \"R²=\" in l:
+                        try: r2s.append(float(l.split(\"R²=\")[1].split()[0]))
+                        except: pass
+                mean_r2 = sum(r2s)/len(r2s) if r2s else 0
+                return f\"done  {done}/{total} jobs  mean_r2={mean_r2:.3f}\"
+            if done > 0:
+                last = complete_lines[-1]
+                # extract model, r2
+                try:
+                    model = last.split(\"Model=\")[1].split(\"|\")[0].strip()
+                    r2 = last.split(\"R²=\")[1].split()[0]
+                    last_str = f\"{model} R²={r2}\"
+                except:
+                    last_str = last[-40:]
+                return f\"{done}/{total} jobs  last: {last_str}\"
+            if total > 0:
+                return f\"0/{total} jobs  loading...\"
+        # Fallback: recent line from fold log
         logs = list(d.parent.glob(f\"tta_fold{i}.log\"))
         if logs:
             lines = logs[0].read_text().splitlines()
             for l in reversed(lines):
-                if l.strip():
-                    return f\"running: {l.strip()[-55:]}\"
+                if l.strip() and \"\\r\" not in l:
+                    return f\"starting: {l.strip()[-55:]}\"
         return \"running\"
 
     g_stat = model_status(g_dir)
