@@ -143,7 +143,7 @@ nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,temperatur
     --format=csv,noheader,nounits 2>/dev/null
 
 echo "=LOG="
-tail -8 /tmp/ca_mc.log 2>/dev/null || echo "(no log yet)"
+tail -8 /tmp/ca_mc_tta.log 2>/dev/null || tail -8 /tmp/ca_mc.log 2>/dev/null || echo "(no log yet)"
 '
 
 echo "━━━  cross-animal-mc  $(date '+%H:%M:%S')  ━━━"
