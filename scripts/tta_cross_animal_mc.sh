@@ -56,7 +56,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     bash "${RETRY}" python -u tta_testing.py \
         --model-paths "G_model:${G_MODEL}/best" "J_model:${J_MODEL}/best" \
         --output-dir "${OUT_DIR}" \
-        --cuda-device 0 \
+        --use-multi-gpu --gpu-ids 0 1 2 3 4 5 6 7 \
         ${STANDARD_TTA_FLAGS} \
         2>&1 | tee "${CROSS_ANIMAL_DIR}/tta_fold${i}.log"
 done
