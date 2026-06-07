@@ -54,7 +54,7 @@ echo "============================================================"
 # --- Training ---
 BUCKET="${BUCKET}" bash "${REPO_ROOT}/scripts/cloud/with_incremental_rsync.sh" \
     "${OUTPUT_BASE}" \
-    bash scripts/train_cross_animal_mc.sh ${SESSIONS_FILE} "${OUTPUT_BASE}"
+    bash scripts/train_cross_animal_mc.sh "${SESSIONS_FILE}" "${OUTPUT_BASE}"
 
 echo ""
 echo "Training complete. Syncing -> gs://${BUCKET}/models/${OUTPUT_BASE}/"
