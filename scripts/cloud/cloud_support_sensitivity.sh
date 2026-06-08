@@ -57,12 +57,13 @@ echo "  data dir:     ${TBFM_DATA_DIR}"
 echo "  bucket:       gs://${BUCKET}"
 echo "============================================================"
 
-# Download just the best/ checkpoint (small — ~100MB)
+# Download best/ checkpoint and hisi.torch (held-in sessions list, needed by tta_testing.py)
 echo ""
-echo "Downloading model checkpoint from gs://${BUCKET}/models/${FOLD_PATH}/best/ ..."
+echo "Downloading model checkpoint from gs://${BUCKET}/models/${FOLD_PATH}/ ..."
 mkdir -p "${LOCAL_FOLD}/best"
 gsutil -m rsync -r "gs://${BUCKET}/models/${FOLD_PATH}/best/" "${LOCAL_FOLD}/best/"
-echo "Model ready at: ${LOCAL_FOLD}/best/"
+gsutil cp "gs://${BUCKET}/models/${FOLD_PATH}/hisi.torch" "${LOCAL_FOLD}/hisi.torch"
+echo "Model ready at: ${LOCAL_FOLD}/"
 
 # Run sensitivity sweep with incremental GCS rsync
 echo ""
