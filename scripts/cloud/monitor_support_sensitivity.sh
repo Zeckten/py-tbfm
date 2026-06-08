@@ -8,10 +8,11 @@
 
 PROJECT="${PROJECT:-nsf-2223495-425310}"
 ZONE="${ZONE:-us-east4-c}"
-VM_NAME="${1:-support-sensitivity}"
+VM_NAME="${1:-cross-animal-mc}"
 
 REMOTE_CMD='
 OUT_DIR=$(ls -dt /opt/py-tbfm/sensitivity_* 2>/dev/null | head -1 || true)
+[ -z "${OUT_DIR}" ] && OUT_DIR=$(ls -dt /home/*/py-tbfm/sensitivity_* 2>/dev/null | head -1 || true)
 
 echo "=META="
 echo "${OUT_DIR:-none}"
@@ -81,7 +82,13 @@ nvidia-smi --query-gpu=index,utilization.gpu,memory.used,memory.total,temperatur
     --format=csv,noheader,nounits 2>/dev/null
 
 echo "=LOG="
-tail -6 /tmp/sensitivity.log 2>/dev/null || echo "(no log yet)"
+# Tail the most recent draw log
+LOG=$(ls -t /opt/py-tbfm/sensitivity_*/draw*.log 2>/dev/null | head -1 || true)
+if [ -n "${LOG}" ]; then
+    tail -5 "${LOG}"
+else
+    echo "(no log yet)"
+fi
 '
 
 echo "━━━  support-sensitivity  $(date '+%H:%M:%S')  ━━━"
