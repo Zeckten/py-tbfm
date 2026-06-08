@@ -63,6 +63,7 @@ echo "Downloading model checkpoint from gs://${BUCKET}/models/${FOLD_PATH}/ ..."
 mkdir -p "${LOCAL_FOLD}/best"
 gsutil -m rsync -r "gs://${BUCKET}/models/${FOLD_PATH}/best/" "${LOCAL_FOLD}/best/"
 gsutil cp "gs://${BUCKET}/models/${FOLD_PATH}/hisi.torch" "${LOCAL_FOLD}/hisi.torch"
+gsutil cp "gs://${BUCKET}/models/${FOLD_PATH}/hyperparameters.torch" "${LOCAL_FOLD}/hyperparameters.torch"
 echo "Model ready at: ${LOCAL_FOLD}/"
 
 # Run sensitivity sweep with incremental GCS rsync
