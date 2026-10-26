@@ -33,6 +33,29 @@ echo ""
 SUPPORT_SIZE=${SUPPORT_SIZE:-1000}
 TTA_EPOCHS=7001
 NUM_FOLDS=20
+# --auto-gpu-slots: GPU_CANDIDATES lists which physical GPUs are eligible
+# (not repeated -- the fill level per GPU is MAX_JOBS_PER_GPU, checked live
+# against real GPU occupancy at startup and periodically during the run, not
+# hardcoded). Any other user's process using more than OTHER_USER_GB_THRESHOLD
+# counts as occupying one of our slots. MAX_JOBS_PER_GPU=1: a careful 1/2/3
+# sweep against this exact job (real fold0 checkpoint, support=1000) showed
+# conc=2 is memory-safe (0/20 failed, 18.4GB/24.6GB peak) but gives
+# essentially no speedup over conc=1 (268s wall vs 259s to drain the same
+# 20-job queue), while conc=3 collapses (18/20 jobs failed -- a mix of
+# "CUDA error: out of memory" and "CUDA error: invalid argument"; the sweep's
+# OOM-detection grep originally only matched the literal "CUDA out of
+# memory" string and missed the invalid-argument failures entirely --
+# always grep "Error processing job" broadly, not a specific CUDA message,
+# when auditing a sweep's failure count). So 1/GPU is the fastest-or-tied
+# AND safest setting here -- re-sweep with wall-clock comparisons, not just
+# an OOM check, before raising it. See run_queue.sh for why the old flat
+# "8/GPU" default was wrong. Failed-but-partially-complete folds can be
+# backfilled afterward by harvesting
+# adapted_models/<fold>_support<N>_coadapt/<session>/metadata.torch's
+# 'final_r2' field directly (NOT 'per_session_r2s', which is ~2x too high).
+GPU_CANDIDATES="${GPU_CANDIDATES:-0 1}"
+MAX_JOBS_PER_GPU="${MAX_JOBS_PER_GPU:-1}"
+OTHER_USER_GB_THRESHOLD="${OTHER_USER_GB_THRESHOLD:-5}"
 
 # Create or reuse TTA output directory
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -84,8 +107,10 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         continue
     fi
 
-    # Check if model files exist (new save format: tbfm.torch in fold dir)
-    if [ ! -f "${FOLD_DIR}/tbfm.torch" ] && [ ! -f "${FOLD_DIR}/model.torch" ] && [ ! -f "${FOLD_DIR}/model_nf_1.torch" ]; then
+    # Check if model files exist (monolithic or split format, matching
+    # scripts/tta_random_folds.sh's check)
+    if [ ! -f "${FOLD_DIR}/model_nf_1.torch" ] && [ ! -f "${FOLD_DIR}/model.torch" ] \
+            && [ ! -f "${FOLD_DIR}/model/tbfm.torch" ] && [ ! -f "${FOLD_DIR}/tbfm.torch" ]; then
         echo "WARNING: No model file found in fold ${i}, skipping..."
         continue
     fi
@@ -114,11 +139,22 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
 
     mkdir -p ${FOLD_TTA_DIR}
 
+    # Prefer the best-validation-R2 checkpoint (current-code training writes
+    # this via model_save_path=best/) over the final-training-epoch model in
+    # the fold root, matching scripts/tta_random_folds.sh's same check.
+    if [ -f "${FOLD_DIR}/best/tbfm.torch" ]; then
+        MODEL_PATH="${FOLD_DIR}/best"
+    else
+        MODEL_PATH="${FOLD_DIR}"
+    fi
+
     # Run TTA for this fold using co-adaptation strategy
     python tta_testing.py \
-        --model-paths fold${i}:${FOLD_DIR} \
+        --model-paths fold${i}:${MODEL_PATH} \
         --use-multi-gpu \
-        --gpu-ids 0 1 \
+        --gpu-ids ${GPU_CANDIDATES} \
+        --auto-gpu-slots --max-jobs-per-gpu "${MAX_JOBS_PER_GPU}" \
+        --other-user-gb-threshold "${OTHER_USER_GB_THRESHOLD}" \
         --support-sizes ${SUPPORT_SIZE} \
         --max-adapt-sessions 20 \
         --tta-epochs ${TTA_EPOCHS} \

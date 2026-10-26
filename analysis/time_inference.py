@@ -19,6 +19,13 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).parent.parent.resolve()
+# Running this script directly (python analysis/time_inference.py) sets
+# sys.path[0] to analysis/, not the repo root, so `import tbfm` would
+# otherwise silently fall through to whatever stale tbfm build is
+# pip-installed in site-packages instead of the live repo source.
+sys.path.insert(0, str(REPO_ROOT))
+
 import torch
 from omegaconf import OmegaConf
 from hydra import initialize_config_dir, compose
@@ -28,7 +35,6 @@ import tbfm.multisession as multisession
 from tbfm.tbfm import TBFM as TBFMModel
 
 DATA_DIR = os.getenv("TBFM_DATA_DIR", "/var/data/opto-coproc/")
-REPO_ROOT = Path(__file__).parent.resolve()
 DEFAULT_FOLD_DIR = REPO_ROOT / "random_folds_20260101_211200" / "fold0"
 
 
@@ -71,9 +77,6 @@ def apply_hyperparams(cfg, params: dict) -> object:
     if params.get("is_basis_residual") is not None:
         cfg.meta.is_basis_residual = params["is_basis_residual"]
         cfg.tbfm.module.is_basis_residual = params["is_basis_residual"]  # resolved copy
-    if params.get("use_two_stage") is not None:
-        cfg.ae.use_two_stage = params["use_two_stage"]
-
     # Eval-time AE config: warm-start as identity, no co-adaptation
     cfg.ae.training.coadapt = False
     cfg.ae.warm_start_is_identity = True

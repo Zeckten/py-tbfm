@@ -30,6 +30,23 @@ NUM_FOLDS=$(python -c "import json; print(len(json.load(open('${SESSIONS_JSON}')
 STANDARD_TTA_FLAGS="--unfreeze-bases --progressive-unfreezing-threshold 0 \
 --tta-epochs 7001 --support-sizes 1000 --max-adapt-sessions 40"
 
+# --auto-gpu-slots: don't hardcode how many workers go on each GPU. Instead,
+# tta_testing.py checks real GPU occupancy at startup AND periodically during
+# the run, fills whatever slots are actually free (up to MAX_JOBS_PER_GPU),
+# and treats any other user's process using more than OTHER_USER_GB_THRESHOLD
+# as occupying one of our slots. MAX_JOBS_PER_GPU=1: a careful 1/2/3 sweep
+# showed conc=2 is memory-safe (0 failures, 18.3GB/24.6GB peak) but gives
+# essentially NO speedup over conc=1 (481s wall vs 464s to drain the same
+# job queue -- this job is contention-bound on something other than raw GPU
+# compute, so packing more workers per GPU doesn't help throughput here).
+# conc=3 collapses (97.5% GPU memory, real OOM failures). So 1/GPU is both
+# the fastest-or-tied AND the safest setting -- do not raise this without
+# re-measuring wall-clock, not just checking for OOM; a prior run at 8/GPU
+# on this same job shape produced cascading OOM failures.
+GPU_CANDIDATES="${GPU_CANDIDATES:-0 1}"
+MAX_JOBS_PER_GPU="${MAX_JOBS_PER_GPU:-1}"
+OTHER_USER_GB_THRESHOLD="${OTHER_USER_GB_THRESHOLD:-5}"
+
 echo "Cross-animal MC TTA"
 echo "  Dir:       ${CROSS_ANIMAL_DIR}"
 echo "  NUM_FOLDS: ${NUM_FOLDS}"
@@ -56,8 +73,11 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     bash "${RETRY}" python -u tta_testing.py \
         --model-paths "G_model:${G_MODEL}/best" "J_model:${J_MODEL}/best" \
         --output-dir "${OUT_DIR}" \
-        --use-multi-gpu --gpu-ids 0 1 2 3 4 5 6 7 \
+        --use-multi-gpu --gpu-ids ${GPU_CANDIDATES} \
+        --auto-gpu-slots --max-jobs-per-gpu "${MAX_JOBS_PER_GPU}" \
+        --other-user-gb-threshold "${OTHER_USER_GB_THRESHOLD}" \
         ${STANDARD_TTA_FLAGS} \
+        --coadapt-tta \
         2>&1 | tee "${CROSS_ANIMAL_DIR}/tta_fold${i}.log"
 done
 

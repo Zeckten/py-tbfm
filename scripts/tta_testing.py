@@ -7,12 +7,15 @@ Evaluates TTA performance across multiple models, support sizes, and adaptation 
 
 import argparse
 import csv
+import getpass
 import json
 import math
 import multiprocessing as mp
 import os
 import random
+import subprocess
 import sys
+import threading
 import time
 from copy import deepcopy
 from datetime import datetime
@@ -74,7 +77,38 @@ def parse_args():
         nargs="+",
         type=int,
         default=None,
-        help="Specific GPU IDs to use (e.g., --gpu-ids 0 1 2 3). If not specified, uses all available GPUs.",
+        help="Specific GPU IDs to use (e.g., --gpu-ids 0 1 2 3). If not specified, uses all available GPUs. "
+        "Ignored when --auto-gpu-slots is set.",
+    )
+    parser.add_argument(
+        "--auto-gpu-slots",
+        action="store_true",
+        help="Don't take a fixed --gpu-ids list. Instead, at startup and periodically during the run, "
+        "check real GPU occupancy (via nvidia-smi) and fill whatever slots are actually free, up to "
+        "--max-jobs-per-gpu per GPU. Any OTHER user's process using more than --other-user-gb-threshold "
+        "is counted as occupying one of our slots, so this machine's shared load is accounted for live "
+        "instead of guessed at launch time.",
+    )
+    parser.add_argument(
+        "--max-jobs-per-gpu",
+        type=int,
+        default=2,
+        help="With --auto-gpu-slots: our own safe concurrency ceiling per physical GPU for this job shape "
+        "(measure this empirically per job shape -- it is NOT safe to assume across different model sizes).",
+    )
+    parser.add_argument(
+        "--other-user-gb-threshold",
+        type=float,
+        default=5.0,
+        help="With --auto-gpu-slots: a non-owned process using more than this many GB on a GPU counts as "
+        "one filled slot on that GPU, regardless of exactly how much more it's using.",
+    )
+    parser.add_argument(
+        "--slot-poll-interval",
+        type=float,
+        default=45.0,
+        help="With --auto-gpu-slots: seconds between re-checks for newly freed GPU slots during the run. "
+        "Workers are only ever added when a slot opens, never killed mid-job when one closes.",
     )
     parser.add_argument(
         "--support-sizes",
@@ -386,6 +420,96 @@ def apply_ablation_overrides(cfg, overrides: dict, log_prefix: str = ""):
     return cfg
 
 
+def _other_user_filled_slots(gpu_id: int, threshold_gb: float) -> int:
+    """
+    Count processes on this GPU that belong to someone else and are using
+    more than threshold_gb -- this machine is shared, and a fixed --gpu-ids
+    list picked at launch time can't see load that shows up (or disappears)
+    after that. Each such process counts as exactly one filled slot,
+    regardless of how far over the threshold it is.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_memory",
+                "--format=csv,noheader,nounits",
+                "-i",
+                str(gpu_id),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        ).stdout
+    except Exception as e:
+        print(f"[slot-detect] Warning: nvidia-smi query failed for GPU {gpu_id}: {e}")
+        return 0
+
+    me = getpass.getuser()
+    threshold_mib = threshold_gb * 1024
+    filled = 0
+    for line in out.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) != 2:
+            continue
+        pid_str, mem_str = parts
+        try:
+            pid = int(pid_str)
+            mem_mib = float(mem_str)
+        except ValueError:
+            continue
+        if mem_mib <= threshold_mib:
+            continue
+        try:
+            owner = subprocess.run(
+                ["ps", "-o", "user=", "-p", str(pid)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+        except Exception:
+            owner = ""
+        # A PID that no longer resolves (exited between the two calls) or
+        # that belongs to us is not someone else's job.
+        if owner and owner != me:
+            filled += 1
+    return filled
+
+
+def _free_gpu_slots(
+    gpu_id: int, max_jobs_per_gpu: int, other_user_gb_threshold: float, own_running: int
+) -> int:
+    """How many more of OUR workers can safely start on this GPU right now."""
+    other = _other_user_filled_slots(gpu_id, other_user_gb_threshold)
+    free = max_jobs_per_gpu - other - own_running
+    return max(0, free)
+
+
+def _compute_auto_gpu_ids(
+    candidate_gpus: List[int], max_jobs_per_gpu: int, other_user_gb_threshold: float
+) -> List[int]:
+    """
+    Build the initial flat gpu_ids list (e.g. [0, 0, 1] for 2 free on GPU0,
+    1 free on GPU1) from live GPU occupancy instead of a hardcoded list.
+    """
+    gpu_ids = []
+    for gpu in candidate_gpus:
+        free = _free_gpu_slots(gpu, max_jobs_per_gpu, other_user_gb_threshold, own_running=0)
+        gpu_ids.extend([gpu] * free)
+        print(
+            f"[slot-detect] GPU {gpu}: {max_jobs_per_gpu - free} slot(s) unavailable "
+            f"(other users' jobs >{other_user_gb_threshold}GB), {free} free of {max_jobs_per_gpu}"
+        )
+    if not gpu_ids:
+        print(
+            "[slot-detect] WARNING: no free slots on any candidate GPU right now -- "
+            "falling back to 1 worker on the first candidate so the run can still start."
+        )
+        gpu_ids = [candidate_gpus[0]]
+    return gpu_ids
+
+
 def gpu_worker(
     gpu_id: int,
     job_queue: mp.Queue,
@@ -424,6 +548,13 @@ def gpu_worker(
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     device = "cuda:0"  # After setting CUDA_VISIBLE_DEVICES, use device 0
+
+    # Explicit thread cap, not just the OMP_NUM_THREADS/MKL_NUM_THREADS env
+    # vars a launch script sets: those only bound OpenMP/MKL's own pools, but
+    # a packed worker also carries CUDA-context and framework threads outside
+    # that pool, so relying on the env var alone still oversubscribes the
+    # host when many workers are packed per GPU.
+    torch.set_num_threads(max(1, min(4, os.cpu_count() or 4)))
 
     # Reconstruct config from dict
     cfg = OmegaConf.create(cfg_dict)
@@ -922,6 +1053,17 @@ def gpu_worker(
                         "gpu_id": gpu_id,
                     }
                 )
+                # A failed job (e.g. CUDA OOM) leaves whatever it allocated
+                # before failing still cached by this process's allocator --
+                # unlike the success path above, nothing here ever freed it,
+                # so a worker that fails once keeps failing and starves the
+                # other workers packed on the same GPU. Clear it so one bad
+                # job can't permanently shrink this worker's headroom.
+                import gc
+
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         except Empty:
             continue
@@ -1714,11 +1856,21 @@ def run_tta_sweep_multi_gpu(
     support_seed: int | None = None,
     ablation_overrides: dict | None = None,
     zero_rest_embeddings: bool = False,
+    auto_gpu_slots: bool = False,
+    gpu_candidates: List[int] | None = None,
+    max_jobs_per_gpu: int = 2,
+    other_user_gb_threshold: float = 5.0,
+    slot_poll_interval: float = 45.0,
 ) -> Dict:
     """
     Multi-GPU version of run_tta_sweep using multiprocessing.
 
-    Distributes TTA jobs across multiple GPUs in parallel.
+    Distributes TTA jobs across multiple GPUs in parallel. If auto_gpu_slots
+    is set, gpu_ids is just the INITIAL assignment -- a background thread
+    keeps checking real GPU occupancy (ours + other users') and grows the
+    worker pool into any slot that opens up during the run, up to
+    max_jobs_per_gpu per physical GPU. It never kills a worker mid-job when a
+    slot closes (another user's job starting) -- it only adds.
     """
     model_names = list(model_paths.keys())
 
@@ -1736,19 +1888,37 @@ def run_tta_sweep_multi_gpu(
         print(
             f"Creating per-session jobs for progressive unfreezing ({len(adapt_session_ids)} sessions)"
         )
-        # Expand jobs to include session IDs
+        # Expand jobs to include session IDs, skipping any (model, support,
+        # strategy, session) whose output was already saved by a prior run --
+        # metadata.torch is written last for a completed session, so its
+        # presence is a reliable completion marker for resuming a killed run.
         tta_jobs_expanded = []
+        skipped = 0
         for job in jobs:
             if len(job) == 3:  # TTA job
                 model_key, support_size, strategy_key = job
                 # Create one job per session
                 for session_id in adapt_session_ids:
+                    if output_dir is not None:
+                        metadata_path = (
+                            output_dir
+                            / "adapted_models"
+                            / f"{model_key}_support{support_size}_{strategy_key}"
+                            / session_id
+                            / "metadata.torch"
+                        )
+                        if metadata_path.exists():
+                            skipped += 1
+                            continue
                     tta_jobs_expanded.append(
                         (model_key, support_size, strategy_key, session_id)
                     )
         tta_jobs = tta_jobs_expanded
         baseline_jobs = [j for j in jobs if len(j) == 2]
-        print(f"Expanded to {len(tta_jobs)} per-session TTA jobs")
+        print(
+            f"Expanded to {len(tta_jobs)} per-session TTA jobs "
+            f"({skipped} already completed, skipped)"
+        )
     else:
         # Separate TTA jobs from baseline jobs
         baseline_jobs = [j for j in jobs if len(j) == 2]
@@ -1842,13 +2012,11 @@ def run_tta_sweep_multi_gpu(
         for job in tta_jobs:
             job_queue.put(job)
 
-        # Add poison pills (one per worker)
-        for _ in gpu_ids:
-            job_queue.put(None)
-
-        # Start worker processes using spawn context
         workers = []
-        for gpu_id in gpu_ids:
+        worker_gpus = []
+        workers_lock = threading.Lock()
+
+        def _spawn_worker(gpu_id: int):
             p = mp_context.Process(
                 target=gpu_worker,
                 args=(
@@ -1871,7 +2039,52 @@ def run_tta_sweep_multi_gpu(
                 ),
             )
             p.start()
-            workers.append(p)
+            with workers_lock:
+                workers.append(p)
+                worker_gpus.append(gpu_id)
+
+        if not auto_gpu_slots:
+            # Static pool, sized once at launch -- add one poison pill per
+            # worker now, since no more workers will ever be spawned.
+            for _ in gpu_ids:
+                job_queue.put(None)
+            for gpu_id in gpu_ids:
+                _spawn_worker(gpu_id)
+            filler_stop = None
+            filler_thread = None
+        else:
+            for gpu_id in gpu_ids:
+                _spawn_worker(gpu_id)
+
+            candidates = gpu_candidates if gpu_candidates else sorted(set(gpu_ids))
+            filler_stop = threading.Event()
+
+            def _slot_filler():
+                while not filler_stop.wait(slot_poll_interval):
+                    for gpu in candidates:
+                        with workers_lock:
+                            own_running = sum(
+                                1
+                                for g, p in zip(worker_gpus, workers)
+                                if g == gpu and p.is_alive()
+                            )
+                            remaining = len(tta_jobs) - completed
+                        if remaining <= 0:
+                            continue
+                        free = _free_gpu_slots(
+                            gpu, max_jobs_per_gpu, other_user_gb_threshold, own_running
+                        )
+                        free = min(free, remaining)
+                        for _ in range(free):
+                            print(
+                                f"[slot-filler] GPU {gpu}: a slot opened up, growing "
+                                f"{own_running} -> {own_running + 1} worker(s)"
+                            )
+                            _spawn_worker(gpu)
+                            own_running += 1
+
+            filler_thread = threading.Thread(target=_slot_filler, daemon=True)
+            filler_thread.start()
 
         # Collect results with progress bar
         completed = 0
@@ -1941,6 +2154,18 @@ def run_tta_sweep_multi_gpu(
                     continue
 
             progress.close()
+
+            if filler_stop is not None:
+                # All real jobs are collected -- stop growing the pool, then
+                # send exactly one exit signal per worker that actually
+                # exists (dynamic, so the upfront-pill count from the static
+                # path would be wrong here).
+                filler_stop.set()
+                filler_thread.join()
+                with workers_lock:
+                    n_workers = len(workers)
+                for _ in range(n_workers):
+                    job_queue.put(None)
 
             # Wait for all workers to finish
             for p in workers:
@@ -2021,12 +2246,17 @@ def run_tta_sweep(
     gpu_ids: List[int] = None,
     progressive_unfreezing_enabled: bool = False,
     use_coadapt: bool = False,
+    use_joint: bool = False,
     both_methods: bool = False,
     adapt_ae: bool = True,
     random_sample_support: bool = False,
     support_seed: int | None = None,
     ablation_overrides: dict | None = None,
     zero_rest_embeddings: bool = False,
+    auto_gpu_slots: bool = False,
+    max_jobs_per_gpu: int = 2,
+    other_user_gb_threshold: float = 5.0,
+    slot_poll_interval: float = 45.0,
 ) -> Dict:
     """
     Run comprehensive TTA sweep across models, support sizes, and strategies.
@@ -2053,7 +2283,7 @@ def run_tta_sweep(
         Dictionary containing all results and metadata
     """
     tta_strategies = get_tta_strategies(
-        use_coadapt=use_coadapt, both_methods=both_methods
+        use_coadapt=use_coadapt, use_joint=use_joint, both_methods=both_methods
     )
     model_names = list(model_paths.keys())
 
@@ -2131,10 +2361,24 @@ def run_tta_sweep(
             "a single id is fine), or adapt one session with --adapt-session."
         )
 
+    gpu_candidates = None
     if use_multi_gpu:
-        if gpu_ids is None:
-            gpu_ids = list(range(torch.cuda.device_count()))
-        print(f"Multi-GPU mode: Using GPUs {gpu_ids}")
+        if auto_gpu_slots:
+            gpu_candidates = (
+                gpu_ids if gpu_ids else list(range(torch.cuda.device_count()))
+            )
+            gpu_ids = _compute_auto_gpu_ids(
+                gpu_candidates, max_jobs_per_gpu, other_user_gb_threshold
+            )
+            print(
+                f"Auto GPU-slot mode: starting with {gpu_ids} "
+                f"(candidates={gpu_candidates}, max/GPU={max_jobs_per_gpu}, "
+                f"other-user threshold={other_user_gb_threshold}GB)"
+            )
+        else:
+            if gpu_ids is None:
+                gpu_ids = list(range(torch.cuda.device_count()))
+            print(f"Multi-GPU mode: Using GPUs {gpu_ids}")
     else:
         print(f"Single-GPU mode: Using device {device}")
 
@@ -2170,6 +2414,11 @@ def run_tta_sweep(
             support_seed=support_seed,
             ablation_overrides=ablation_overrides,
             zero_rest_embeddings=zero_rest_embeddings,
+            auto_gpu_slots=auto_gpu_slots,
+            gpu_candidates=gpu_candidates,
+            max_jobs_per_gpu=max_jobs_per_gpu,
+            other_user_gb_threshold=other_user_gb_threshold,
+            slot_poll_interval=slot_poll_interval,
         )
 
     with open(log_path, "w", buffering=1, encoding="utf-8") as log_stream:
@@ -2977,12 +3226,17 @@ def _main_impl(args):
         gpu_ids=args.gpu_ids,
         progressive_unfreezing_enabled=progressive_unfreezing_enabled or force_per_session,
         use_coadapt=args.coadapt_tta,
+        use_joint=args.joint_tta,
         both_methods=args.both_methods,
         adapt_ae=not args.no_adapt_ae,
         random_sample_support=args.random_support,
         support_seed=args.support_seed,
         ablation_overrides=ablation_overrides,
         zero_rest_embeddings=args.zero_rest_embeddings,
+        auto_gpu_slots=args.auto_gpu_slots,
+        max_jobs_per_gpu=args.max_jobs_per_gpu,
+        other_user_gb_threshold=args.other_user_gb_threshold,
+        slot_poll_interval=args.slot_poll_interval,
     )
     all_results = [results]
 

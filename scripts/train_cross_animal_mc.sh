@@ -124,7 +124,7 @@ print(','.join(json.load(open('${SESSIONS_JSON}'))['fold${j}']['J_sessions']))
         echo "fold${j}: STARTED ${START_TS} (G→GPU${GPU_G} J→GPU${GPU_J})" >> "${TIMING_LOG}"
 
         python -u tma_standalone.py \
-            ${NUM_BASES} 10 ${GPU_G} false ${BASIS_RESIDUAL_RANK} ${TRAIN_SIZE} true \
+            ${NUM_BASES} 10 ${GPU_G} true ${BASIS_RESIDUAL_RANK} ${TRAIN_SIZE} true \
             --latent-dim ${LATENT_DIM} \
             --batch-size-per-session ${BATCH_SIZE} \
             --out-dir "${FOLD_DIR}/G_model" \
@@ -133,7 +133,7 @@ print(','.join(json.load(open('${SESSIONS_JSON}'))['fold${j}']['J_sessions']))
         PIDS_G+=($!)
 
         python -u tma_standalone.py \
-            ${NUM_BASES} 10 ${GPU_J} false ${BASIS_RESIDUAL_RANK} ${TRAIN_SIZE} true \
+            ${NUM_BASES} 10 ${GPU_J} true ${BASIS_RESIDUAL_RANK} ${TRAIN_SIZE} true \
             --latent-dim ${LATENT_DIM} \
             --batch-size-per-session ${BATCH_SIZE} \
             --out-dir "${FOLD_DIR}/J_model" \

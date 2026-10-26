@@ -28,6 +28,15 @@ import os
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).parent.parent.resolve()
+# Running this script directly (python analysis/collect_coadapt_inference_times.py)
+# sets sys.path[0] to analysis/, not the repo root, so `import tbfm` would
+# otherwise silently fall through to whatever stale tbfm build is pip-installed
+# in site-packages instead of the live repo source -- insert the repo root
+# ahead of that so it shadows it, same as running a script directly from
+# the repo root (e.g. tta_testing.py) already does implicitly.
+sys.path.insert(0, str(REPO_ROOT))
+
 import torch
 
 from time_inference import (
@@ -38,7 +47,6 @@ from time_inference import (
 import timings
 import tbfm.multisession as multisession
 
-REPO_ROOT = Path(__file__).parent.parent.resolve()
 DATA_DIR = os.getenv("TBFM_DATA_DIR", "/var/data/opto-coproc/")
 
 DEFAULT_FOLD_BASE = REPO_ROOT / "random_folds_coadapt_20260225_015603"
@@ -134,7 +142,11 @@ def time_coadapt_fold(
     batch = next(iter(d))
     timing_loader = batch_to_timing_loader(batch, session_id)
 
-    # Coadapt: build without a base model path, then load per-session components
+    # Coadapt: build without a base model path, then load per-session components.
+    # Prefer the best-validation-R2 checkpoint (current-code training writes
+    # this via model_save_path=best/) over the final-training-epoch model,
+    # matching the TTA scripts' same check.
+    checkpoint_dir = fold_dir / "best" if (fold_dir / "best" / "tbfm.torch").exists() else fold_dir
     ms_model = multisession.build_from_cfg(
         fold_cfg,
         d,
@@ -142,7 +154,7 @@ def time_coadapt_fold(
         device=device_str,
         quiet=True,
     )
-    multisession.load_model_components(fold_dir, ms_model, device=device_str)
+    multisession.load_model_components(checkpoint_dir, ms_model, device=device_str)
     ms_model.eval()
 
     emb_rest = multisession.load_rest_embeddings(
@@ -172,49 +184,53 @@ def collect_folds(
     devices: list[str],
     iterations: int,
     cfg,
+    fold_names: list[str] | None = None,
 ) -> None:
-    # All folds have identical architecture; time fold0 as the representative.
-    fold_dir = fold_base / "fold0"
-    if not fold_dir.exists():
-        print(f"  [missing] {fold_dir}")
-        return
+    # Architecture is identical across folds, but one fold alone is a single
+    # sample; time a small spread so Table II's coadapt row isn't n=1.
+    fold_names = fold_names or ["fold0", "fold7", "fold14"]
 
-    print(f"\n{'='*60}")
-    print(f"Coadapt: timing fold0 (representative — all folds identical architecture)")
-    print(f"{'='*60}")
-
-    hisi: list[str] = torch.load(fold_dir / "hisi.torch", map_location="cpu")
-    session_id = hisi[0]
-    fold_name = fold_dir.name
-
-    for device_str in devices:
-        row_proto = {
-            "model_type": "coadapt",
-            "train_size": TRAIN_SIZE,
-            "fold": fold_name,
-            "session": session_id,
-            "device": device_str,
-            "n_iterations": iterations,
-            "model_dir": str(fold_dir),
-        }
-        if writer.already_done(row_proto):
-            print(f"  [skip] {fold_name} / {session_id} / {device_str}")
+    for fold_name in fold_names:
+        fold_dir = fold_base / fold_name
+        if not fold_dir.exists():
+            print(f"  [missing] {fold_dir}")
             continue
 
-        print(f"  Timing {fold_name} / {session_id} / {device_str} … ", end="", flush=True)
-        try:
-            mean_ms, p50_ms, p99_ms = time_coadapt_fold(
-                fold_dir, session_id, cfg, device_str, iterations
-            )
-            row_proto.update({
-                "mean_ms": f"{mean_ms:.4f}",
-                "p50_ms": f"{p50_ms:.4f}",
-                "p99_ms": f"{p99_ms:.4f}",
-            })
-            writer.write(row_proto)
-            print(f"mean={mean_ms:.3f}ms  p50={p50_ms:.3f}ms  p99={p99_ms:.3f}ms")
-        except Exception as e:
-            print(f"ERROR: {e}")
+        print(f"\n{'='*60}")
+        print(f"Coadapt: timing {fold_name}")
+        print(f"{'='*60}")
+
+        hisi: list[str] = torch.load(fold_dir / "hisi.torch", map_location="cpu")
+        session_id = hisi[0]
+
+        for device_str in devices:
+            row_proto = {
+                "model_type": "coadapt",
+                "train_size": TRAIN_SIZE,
+                "fold": fold_name,
+                "session": session_id,
+                "device": device_str,
+                "n_iterations": iterations,
+                "model_dir": str(fold_dir),
+            }
+            if writer.already_done(row_proto):
+                print(f"  [skip] {fold_name} / {session_id} / {device_str}")
+                continue
+
+            print(f"  Timing {fold_name} / {session_id} / {device_str} … ", end="", flush=True)
+            try:
+                mean_ms, p50_ms, p99_ms = time_coadapt_fold(
+                    fold_dir, session_id, cfg, device_str, iterations
+                )
+                row_proto.update({
+                    "mean_ms": f"{mean_ms:.4f}",
+                    "p50_ms": f"{p50_ms:.4f}",
+                    "p99_ms": f"{p99_ms:.4f}",
+                })
+                writer.write(row_proto)
+                print(f"mean={mean_ms:.3f}ms  p50={p50_ms:.3f}ms  p99={p99_ms:.3f}ms")
+            except Exception as e:
+                print(f"ERROR: {e}")
 
 
 def main() -> None:
@@ -232,6 +248,8 @@ def main() -> None:
                         help="Skip rows already in the output CSV (for resuming)")
     parser.add_argument("--folds-dir", default=str(DEFAULT_FOLD_BASE),
                         help=f"Path to coadapt folds directory (default: {DEFAULT_FOLD_BASE})")
+    parser.add_argument("--folds", default="fold0,fold7,fold14",
+                        help="Comma-separated fold names to time (default: fold0,fold7,fold14)")
     args = parser.parse_args()
 
     torch.set_grad_enabled(False)
@@ -258,7 +276,8 @@ def main() -> None:
 
     cfg = load_cfg()
 
-    collect_folds(Path(args.folds_dir), writer, devices, args.iterations, cfg)
+    fold_names = [f.strip() for f in args.folds.split(",") if f.strip()]
+    collect_folds(Path(args.folds_dir), writer, devices, args.iterations, cfg, fold_names)
 
     print(f"\nDone. Results written to {output_path}")
 

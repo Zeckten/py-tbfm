@@ -2,26 +2,39 @@
 # Train coadapt models using the exact same folds as an existing MAML random-folds run.
 # Reads hisi.torch from each MAML fold to guarantee identical session selections.
 #
-# Usage: ./train_random_folds_coadapt.sh <maml_folds_dir>
+# Usage: ./train_random_folds_coadapt.sh <maml_folds_dir> [resume_dir]
 # Example: ./train_random_folds_coadapt.sh random_folds_20260101_211200
+# Example (resume): ./train_random_folds_coadapt.sh random_folds_20260101_211200 random_folds_coadapt_20261016_192049
 
 set -e
 
 if [ -z "$1" ]; then
-    echo "Usage: $0 <path_to_maml_random_folds_dir>"
+    echo "Usage: $0 <path_to_maml_random_folds_dir> [resume_dir]"
     echo "Example: $0 random_folds_20260101_211200"
+    echo "Example (resume): $0 random_folds_20260101_211200 random_folds_coadapt_20261016_192049"
     exit 1
 fi
 
 MAML_FOLDS_DIR="$1"
+RESUME_DIR="$2"
 
 if [ ! -d "$MAML_FOLDS_DIR" ]; then
     echo "ERROR: Directory not found: $MAML_FOLDS_DIR"
     exit 1
 fi
 
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-OUTPUT_BASE="random_folds_coadapt_${TIMESTAMP}"
+if [ -n "$RESUME_DIR" ]; then
+    if [ ! -d "$RESUME_DIR" ]; then
+        echo "ERROR: Resume directory not found: $RESUME_DIR"
+        exit 1
+    fi
+    OUTPUT_BASE="$RESUME_DIR"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    echo "Resuming coadapt training in: ${OUTPUT_BASE}"
+else
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    OUTPUT_BASE="random_folds_coadapt_${TIMESTAMP}"
+fi
 
 echo "Starting random folds coadapt training at ${TIMESTAMP}"
 echo "MAML reference dir: ${MAML_FOLDS_DIR}"
@@ -32,18 +45,29 @@ TIMING_LOG="${OUTPUT_BASE}/timing_log.txt"
 SESSION_LOG="${OUTPUT_BASE}/session_selections.txt"
 METRICS_LOG="${OUTPUT_BASE}/fold_metrics.csv"
 
-echo "Random Folds Coadapt Training Log" > ${TIMING_LOG}
-echo "Started at: ${TIMESTAMP}" >> ${TIMING_LOG}
-echo "MAML reference dir: ${MAML_FOLDS_DIR}" >> ${TIMING_LOG}
-echo "========================================" >> ${TIMING_LOG}
-echo "" >> ${TIMING_LOG}
+if [ -n "$RESUME_DIR" ] && [ -f "$TIMING_LOG" ]; then
+    echo "" >> ${TIMING_LOG}
+    echo "========================================" >> ${TIMING_LOG}
+    echo "Resumed at: ${TIMESTAMP}" >> ${TIMING_LOG}
+    echo "========================================" >> ${TIMING_LOG}
+else
+    echo "Random Folds Coadapt Training Log" > ${TIMING_LOG}
+    echo "Started at: ${TIMESTAMP}" >> ${TIMING_LOG}
+    echo "MAML reference dir: ${MAML_FOLDS_DIR}" >> ${TIMING_LOG}
+    echo "========================================" >> ${TIMING_LOG}
+    echo "" >> ${TIMING_LOG}
+fi
 
-echo "Session Selections for Each Fold" > ${SESSION_LOG}
-echo "(Sourced from ${MAML_FOLDS_DIR})" >> ${SESSION_LOG}
-echo "========================================" >> ${SESSION_LOG}
-echo "" >> ${SESSION_LOG}
+if [ ! -f "$SESSION_LOG" ]; then
+    echo "Session Selections for Each Fold" > ${SESSION_LOG}
+    echo "(Sourced from ${MAML_FOLDS_DIR})" >> ${SESSION_LOG}
+    echo "========================================" >> ${SESSION_LOG}
+    echo "" >> ${SESSION_LOG}
+fi
 
-echo "fold,seed,start_time,end_time,duration_sec,final_train_r2,final_test_r2,status" > ${METRICS_LOG}
+if [ ! -f "$METRICS_LOG" ]; then
+    echo "fold,seed,start_time,end_time,duration_sec,final_train_r2,final_test_r2,status" > ${METRICS_LOG}
+fi
 
 # Training parameters (must match original MAML run)
 NUM_FOLDS=20
@@ -93,6 +117,14 @@ except Exception as e:
     if [ $? -ne 0 ]; then
         echo "ERROR: Failed to read ${HISI_FILE}"
         exit 1
+    fi
+
+    # Resume support: skip folds that already finished training (hisi.torch
+    # is one of the last files written, right alongside the final model
+    # save, so its presence means this fold completed cleanly last time).
+    if [ -f "${OUTPUT_BASE}/fold${i}/hisi.torch" ]; then
+        echo "Fold ${i}: already completed (found ${OUTPUT_BASE}/fold${i}/hisi.torch), skipping..."
+        continue
     fi
 
     GPU_ID=$((i % 2))
