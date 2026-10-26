@@ -1358,8 +1358,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--coadapt-data",
-        default="tbfm_cv_data_coadapt.csv",
-        help="Path to coadapt CSV (same format as --data)",
+        default="tbfm_cv_data_joint.csv",
+        help="Path to coadapt/joint-comparison CSV (same format as --data). "
+        "Default points at tbfm_cv_data_joint.csv -- the current data is from "
+        "the joint TTA strategy, not the paper's actual coadapt method; see "
+        "tbfm_cv_data_coadapt_20260225.csv for the (older, differently-matched) "
+        "real coadapt run.",
     )
     parser.add_argument(
         "--seed",

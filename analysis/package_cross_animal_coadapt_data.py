@@ -1,16 +1,25 @@
 #!/usr/bin/env python3
 """
-Package cross-animal coadapt TTA results into the same shape as the existing
+Package cross-animal joint-TTA results into the same shape as the existing
 MAML cross-animal CSVs (cross_animal_mc_sessions.csv / cross_animal_mc_results.csv).
+
+The run this packages (cross_animal_mc_coadapt_20261017_091918) was evaluated
+with the old `--coadapt-tta` flag, which at the time dispatched to
+``test_time_adaptation_joint`` (the alternating embedding/AE strategy) rather
+than the paper's actual "coadapt" method (single shared forward/backward
+pass, now restored as ``test_time_adaptation_coadapt``). Output is
+named/labeled "joint" accordingly, even though the pretraining run directory
+itself is still (correctly) named "coadapt" -- the pretraining method and the
+TTA strategy are independent axes, and only the TTA strategy was mislabeled.
 
 Reads:  cross_animal_mc_coadapt_*/fold*/tta_results/adapted_models/*/*/metadata.torch
             (per-session TTA R², read directly from metadata.torch rather than
             the run's per_session.csv -- matches this project's standing lesson,
             see memory: "Timing log isn't source of truth" / verify from the
             ground-truth per-session result files, not a summary.)
-Writes: cross_animal_mc_coadapt_sessions.csv  (session-level, mirrors cross_animal_mc_sessions.csv)
-        cross_animal_mc_coadapt_results.csv   (aggregated by fold/model/held_out_animal,
-                                                 mirrors cross_animal_mc_results.csv)
+Writes: cross_animal_mc_joint_sessions.csv  (session-level, mirrors cross_animal_mc_sessions.csv)
+        cross_animal_mc_joint_results.csv   (aggregated by fold/model/held_out_animal,
+                                               mirrors cross_animal_mc_results.csv)
 
 Note: unlike the MAML sessions CSV, per-session train_r2 and adapt_time_s are
 not recorded in metadata.torch for the joint TTA strategy, so those columns
@@ -19,14 +28,16 @@ are left blank here rather than fabricated.
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import pandas as pd
 import torch
 
 CROSS_ANIMAL_DIR = Path("/mnt/nsl/danmuir/cross_animal_mc_coadapt_20261017_091918")
-SESSIONS_OUT = Path("cross_animal_mc_coadapt_sessions.csv")
-RESULTS_OUT = Path("cross_animal_mc_coadapt_results.csv")
+SESSIONS_OUT = Path("cross_animal_mc_joint_sessions.csv")
+RESULTS_OUT = Path("cross_animal_mc_joint_results.csv")
+EXPECTED_STRATEGY = "joint"
 
 
 def _animal_from_session_id(session_id: str) -> str:
@@ -41,6 +52,14 @@ def _load_sessions(cross_animal_dir: Path) -> pd.DataFrame:
     for metadata_path in cross_animal_dir.glob("fold*/tta_results/adapted_models/*/*/metadata.torch"):
         fold_name = metadata_path.relative_to(cross_animal_dir).parts[0]
         m = torch.load(metadata_path, map_location="cpu")
+        strategy_key = m.get("strategy_key")
+        if strategy_key != EXPECTED_STRATEGY:
+            sys.exit(
+                f"ERROR: {metadata_path} has strategy_key={strategy_key!r}, "
+                f"expected {EXPECTED_STRATEGY!r}. This script packages joint-TTA "
+                f"results specifically -- mixing strategies into one CSV would "
+                f"silently repeat the exact mislabeling this file was renamed to fix."
+            )
         session_id = metadata_path.parent.name
         model = m["model_key"]
         rows.append(

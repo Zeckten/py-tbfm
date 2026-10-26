@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """
-Package coadapt TTA results into a portable CSV.
+Package joint-TTA results into a portable CSV.
+
+The run this packages (random_folds_coadapt_20261016_192228) was evaluated
+with the old `--coadapt-tta` flag, which at the time dispatched to
+``test_time_adaptation_joint`` (the alternating embedding/AE strategy) rather
+than the paper's actual "coadapt" method (single shared forward/backward
+pass, now restored as ``test_time_adaptation_coadapt`` and the real target of
+`--coadapt-tta`). Output is named/labeled "joint" accordingly, even though
+the pretraining run directory itself is still (correctly) named
+"coadapt" -- the pretraining method and the TTA strategy are independent
+axes, and only the TTA strategy was mislabeled here.
 
 Reads:  random_folds_coadapt_*/tta_results_*/fold*/adapted_models/*/*/metadata.torch
             (per-session TTA R², read directly rather than from tta_summary.csv --
             see _load_from_metadata for why)
         tbfm_cv_data.csv  (vanilla R² baseline)
-Writes: tbfm_cv_data_coadapt.csv
+Writes: tbfm_cv_data_joint.csv
 
 The vanilla R² baseline is shared with MAML — it is the session-level performance
 of a vanilla model and does not depend on the adaptation strategy.
@@ -21,8 +31,9 @@ import torch
 
 COADAPT_DIR  = Path("/mnt/nsl/danmuir/random_folds_coadapt_20261016_192228")
 MAML_CSV     = Path("tbfm_cv_data_twostage.csv")
-OUTPUT_CSV   = Path("tbfm_cv_data_coadapt.csv")
+OUTPUT_CSV   = Path("tbfm_cv_data_joint.csv")
 SUPPORT_SIZES = [500, 1000, 2500, 5000]
+EXPECTED_STRATEGY = "joint"
 
 
 def _latest_tta_dir(coadapt_dir: Path, support_size: int) -> Path | None:
@@ -66,6 +77,14 @@ def _load_from_metadata(tta_dir: Path, support_size: int) -> pd.DataFrame:
         fold_name = metadata_path.relative_to(tta_dir).parts[0]
         session_id = metadata_path.parent.name
         m = torch.load(metadata_path, map_location="cpu")
+        strategy_key = m.get("strategy_key")
+        if strategy_key != EXPECTED_STRATEGY:
+            sys.exit(
+                f"ERROR: {metadata_path} has strategy_key={strategy_key!r}, "
+                f"expected {EXPECTED_STRATEGY!r}. This script packages joint-TTA "
+                f"results specifically -- mixing strategies into one CSV would "
+                f"silently repeat the exact mislabeling this file was renamed to fix."
+            )
         rows.append(
             {
                 "fold": fold_name,
