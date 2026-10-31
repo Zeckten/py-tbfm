@@ -2246,7 +2246,6 @@ def run_tta_sweep(
     gpu_ids: List[int] = None,
     progressive_unfreezing_enabled: bool = False,
     use_coadapt: bool = False,
-    use_joint: bool = False,
     both_methods: bool = False,
     adapt_ae: bool = True,
     random_sample_support: bool = False,
@@ -2283,7 +2282,7 @@ def run_tta_sweep(
         Dictionary containing all results and metadata
     """
     tta_strategies = get_tta_strategies(
-        use_coadapt=use_coadapt, use_joint=use_joint, both_methods=both_methods
+        use_coadapt=use_coadapt, both_methods=both_methods
     )
     model_names = list(model_paths.keys())
 
@@ -3226,7 +3225,6 @@ def _main_impl(args):
         gpu_ids=args.gpu_ids,
         progressive_unfreezing_enabled=progressive_unfreezing_enabled or force_per_session,
         use_coadapt=args.coadapt_tta,
-        use_joint=args.joint_tta,
         both_methods=args.both_methods,
         adapt_ae=not args.no_adapt_ae,
         random_sample_support=args.random_support,
