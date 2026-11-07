@@ -23,7 +23,9 @@
 set -euo pipefail
 mkdir -p logs
 
-source "$(dirname "$0")/env.sh"
+# Not $(dirname "$0") -- Slurm copies the submitted script into a spool dir,
+# so $0 does not point at its location in the repo checkout.
+source "${REPO_DIR:-$HOME/py-tbfm}/scripts/hyak/env.sh"
 
 OUT="${OUT:?Set OUT to the output base dir}"
 MANIFEST="${OUT}/tta_manifest.csv"
