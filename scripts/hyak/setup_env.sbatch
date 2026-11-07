@@ -16,9 +16,12 @@ set -euo pipefail
 REPO_DIR="${REPO_DIR:-$HOME/py-tbfm}"
 REPO_URL="https://github.com/Zeckten/py-tbfm.git"
 BRANCH="twostage-experiments"
-# Pin to the commit pushed for this sweep. If the branch has moved since,
-# abort rather than silently run against unreviewed code.
-EXPECTED_COMMIT="5b3e1524c00936f82034a1289e8858be359b7a13"
+# Pin to the commit verified on kalman right before this job was submitted
+# (pass with --export=EXPECTED_COMMIT=$(git rev-parse HEAD) at submission
+# time -- not hard-coded here, since this file's own hash changes every time
+# its content changes). If the branch has moved since, abort rather than
+# silently run against unreviewed code.
+EXPECTED_COMMIT="${EXPECTED_COMMIT:?Pass --export=EXPECTED_COMMIT=\$(git rev-parse HEAD) at submission time}"
 ENV_PREFIX="${ENV_PREFIX:-/gscratch/rao/danmuir/envs/tbfm}"
 
 echo "=== Cloning ${REPO_URL}@${BRANCH} (shallow -- full history is ~39GB and would blow the home quota) ==="

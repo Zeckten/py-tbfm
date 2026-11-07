@@ -14,8 +14,12 @@ run anything in this directory against `ckpt`, `cse`, or `stf`.**
   of input data.
 - `env.sh` — sourced by every sbatch script. Sets `TBFM_DATA_DIR`, activates
   the conda env, `cd`s to the repo checkout.
-- `setup_env.sbatch` — one-time: shallow-clones this repo at a pinned commit
-  and builds the conda environment in `/gscratch/rao`.
+- `setup_env.sbatch` — one-time: shallow-clones this repo and builds the
+  conda environment in `/gscratch/rao`. Takes `EXPECTED_COMMIT` from the
+  submission command (`sbatch --export=EXPECTED_COMMIT=$(git rev-parse HEAD)
+  scripts/hyak/setup_env.sbatch`), not a hard-coded value — aborts if the
+  clone doesn't match, so it never silently runs against code pushed after
+  you last checked it.
 - `rsync_data.sh` — run from kalman: copies only the 40 sessions'
   `torchraw/`+`embedding_rest/` (~31GB) plus the three top-level metadata
   files to Klone's scrubbed storage. **Do not `rsync -a` the whole
@@ -40,5 +44,6 @@ packed (old binary files committed and later removed) — that alone would
 blow past home's 10GB quota and eat most of `/gscratch/rao`'s free space.
 `setup_env.sbatch` always clones with `--depth 1`, which only fetches the
 objects needed to materialize the tip commit (~8MB tree). It also verifies
-the cloned commit matches the pinned one and aborts if the branch moved
-since this was written — never silently run against unreviewed code.
+the clone matches `EXPECTED_COMMIT` (passed at submission time, see above)
+and aborts if the branch moved since — never silently run against
+unreviewed code.
