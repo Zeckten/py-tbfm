@@ -27,8 +27,9 @@ fi
 
 NUM_FOLDS=$(python -c "import json; print(len(json.load(open('${SESSIONS_JSON}'))))")
 
+SUPPORT_SIZE="${SUPPORT_SIZE:-1000}"
 STANDARD_TTA_FLAGS="--unfreeze-bases --progressive-unfreezing-threshold 0 \
---tta-epochs 7001 --support-sizes 1000 --max-adapt-sessions 40"
+--tta-epochs 7001 --support-sizes ${SUPPORT_SIZE} --max-adapt-sessions 40"
 
 # --auto-gpu-slots: don't hardcode how many workers go on each GPU. Instead,
 # tta_testing.py checks real GPU occupancy at startup AND periodically during
@@ -56,7 +57,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
     FOLD_DIR="${CROSS_ANIMAL_DIR}/fold${i}"
     G_MODEL="${FOLD_DIR}/G_model"
     J_MODEL="${FOLD_DIR}/J_model"
-    OUT_DIR="${FOLD_DIR}/tta_results"
+    OUT_DIR="${FOLD_DIR}/tta_results_${SUPPORT_SIZE}"
 
     if [ ! -d "${G_MODEL}" ] || [ ! -d "${J_MODEL}" ]; then
         echo "WARNING: fold${i} models not found, skipping"
@@ -78,7 +79,7 @@ for i in $(seq 0 $((NUM_FOLDS - 1))); do
         --other-user-gb-threshold "${OTHER_USER_GB_THRESHOLD}" \
         ${STANDARD_TTA_FLAGS} \
         --coadapt-tta \
-        2>&1 | tee "${CROSS_ANIMAL_DIR}/tta_fold${i}.log"
+        2>&1 | tee "${CROSS_ANIMAL_DIR}/tta_fold${i}_support${SUPPORT_SIZE}.log"
 done
 
 echo ""

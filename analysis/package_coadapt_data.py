@@ -2,7 +2,7 @@
 """
 Package joint-TTA results into a portable CSV.
 
-The run this packages (random_folds_coadapt_20261016_192228) was evaluated
+The run this packages (random_folds_joint_20261016_192228) was evaluated
 with the old `--coadapt-tta` flag, which at the time dispatched to
 ``test_time_adaptation_joint`` (the alternating embedding/AE strategy) rather
 than the paper's actual "coadapt" method (single shared forward/backward
@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-COADAPT_DIR  = Path("/mnt/nsl/danmuir/random_folds_coadapt_20261016_192228")
+COADAPT_DIR  = Path("/mnt/nsl/danmuir/random_folds_joint_20261016_192228")
 MAML_CSV     = Path("tbfm_cv_data_twostage.csv")
 OUTPUT_CSV   = Path("tbfm_cv_data_joint.csv")
 SUPPORT_SIZES = [500, 1000, 2500, 5000]

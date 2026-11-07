@@ -3,7 +3,7 @@
 
 normalizers:
   module:
-    _target_: tbfm.normalizers.ScalerQuant
+    _target_: tbfm.normalizers.ScalerZscore
 
   training:
     coadapt: false   # If true, we will adapt in a supervised manner

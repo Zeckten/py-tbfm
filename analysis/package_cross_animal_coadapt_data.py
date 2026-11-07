@@ -3,7 +3,7 @@
 Package cross-animal joint-TTA results into the same shape as the existing
 MAML cross-animal CSVs (cross_animal_mc_sessions.csv / cross_animal_mc_results.csv).
 
-The run this packages (cross_animal_mc_coadapt_20261017_091918) was evaluated
+The run this packages (cross_animal_mc_joint_20261017_091918) was evaluated
 with the old `--coadapt-tta` flag, which at the time dispatched to
 ``test_time_adaptation_joint`` (the alternating embedding/AE strategy) rather
 than the paper's actual "coadapt" method (single shared forward/backward
@@ -34,7 +34,7 @@ from pathlib import Path
 import pandas as pd
 import torch
 
-CROSS_ANIMAL_DIR = Path("/mnt/nsl/danmuir/cross_animal_mc_coadapt_20261017_091918")
+CROSS_ANIMAL_DIR = Path("/mnt/nsl/danmuir/cross_animal_mc_joint_20261017_091918")
 SESSIONS_OUT = Path("cross_animal_mc_joint_sessions.csv")
 RESULTS_OUT = Path("cross_animal_mc_joint_results.csv")
 EXPECTED_STRATEGY = "joint"
