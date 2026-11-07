@@ -26,11 +26,14 @@ i=0
 while read -r SESSION; do
     i=$((i + 1))
     echo "=== [${i}/${N}] ${SESSION} ==="
-    ssh "${DEST_HOST}" "mkdir -p ${DEST_BASE}/${SESSION}"
+    # </dev/null on every ssh inside this loop: without it, ssh inherits the
+    # loop's stdin (redirected from SESSIONS_FILE below) and consumes the
+    # rest of the session list, silently ending the loop after one iteration.
+    ssh "${DEST_HOST}" "mkdir -p ${DEST_BASE}/${SESSION}" </dev/null
     rsync -avP \
         "${SRC_BASE}/${SESSION}/torchraw" \
         "${SRC_BASE}/${SESSION}/embedding_rest" \
-        "${DEST_HOST}:${DEST_BASE}/${SESSION}/"
+        "${DEST_HOST}:${DEST_BASE}/${SESSION}/" </dev/null
 done < "${SESSIONS_FILE}"
 
 echo "=== Done. Verifying remote size ==="
