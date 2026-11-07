@@ -6,11 +6,10 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=5
 #SBATCH --mem=44G
-#SBATCH --time=06:00:00
+#SBATCH --time=22:00:00
 #SBATCH --output=logs/train_%A_%a.log
-# NOTE: --time is a placeholder (3.6h estimate x 1.5 margin). Set the real
-# value from the smoke test's measured fold0 duration before submitting the
-# full array.
+# Measured from the smoke test: 300 epochs took ~1270s (4.23s/epoch) on this
+# rtx6k. Production uses the default 12001 epochs -> ~14.1h, x1.5 margin.
 
 set -euo pipefail
 mkdir -p logs

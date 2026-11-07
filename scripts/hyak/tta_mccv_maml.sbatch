@@ -5,11 +5,13 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=5
 #SBATCH --mem=44G
-#SBATCH --time=02:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=logs/tta_%A_%a.log
-# NOTE: --time is a placeholder, sized for the largest support (5000) with a
-# 1.5x margin over the smoke test's measured duration -- set the real value
-# before submitting the full array.
+# Measured from the smoke test: support=1000 single-session took ~43min
+# total (job time, incl. data loading/setup). Support=5000's scaling for
+# inner_outer wasn't separately measured -- 6h gives generous margin so a
+# slow task times out rather than silently truncating, since a TIMEOUT'd
+# array task is cheap to rerun but a wrong partial result isn't.
 #
 # NOTE: --array is intentionally not set here. The task count depends on the
 # real held-out-session count from tta_manifest.csv (expected 1600 = 20
