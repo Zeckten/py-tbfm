@@ -5,7 +5,11 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-task=5
 #SBATCH --mem=44G
-#SBATCH --time=0:45:00
+#SBATCH --time=2:30:00
+# First attempt (45min) timed out with TTA stuck at 0% progress -- single-
+# session TTA at support=1000, 7001 epochs, had not logged a single epoch
+# tick in ~15min of runtime. Generous budget this time purely to measure the
+# real per-epoch/total duration for sizing the production --time values.
 #SBATCH --output=%x_%j.log
 
 # One-off validation run: short fold0 training + one TTA task at support=1000.
