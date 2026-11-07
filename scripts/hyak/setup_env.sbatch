@@ -36,6 +36,18 @@ if [ "${ACTUAL_COMMIT}" != "${EXPECTED_COMMIT}" ]; then
     exit 1
 fi
 
+# On kalman, tma_standalone.py / tta_testing.py are root-level symlinks into
+# scripts/ -- convenient, but untracked by git, so a fresh clone doesn't have
+# them. Recreate them so every job script's `python tma_standalone.py` /
+# `python tta_testing.py` (matching kalman's own invocation convention) keeps
+# working unchanged.
+ln -sf scripts/tma_standalone.py tma_standalone.py
+ln -sf scripts/tta_testing.py tta_testing.py
+if [ ! -e tma_standalone.py ] || [ ! -e tta_testing.py ]; then
+    echo "ERROR: symlink creation failed or targets missing."
+    exit 1
+fi
+
 echo "=== Building conda env at ${ENV_PREFIX} ==="
 module load conda
 mkdir -p "$(dirname "${ENV_PREFIX}")"
