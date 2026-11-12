@@ -21,6 +21,12 @@
 #   sbatch --array=0-$((N-1))%4 --export=OUT="$OUT" \
 #       --dependency=afterok:<training_array_job_id> \
 #       scripts/hyak/tta_mccv_maml.sbatch
+#
+# If N exceeds Klone's MaxArraySize (1001) or the remaining MaxSubmitPU
+# headroom forces splitting into chunks, keep --array indices low and shift
+# with TASK_OFFSET, e.g. a second chunk covering manifest task_id 970-1599:
+#   sbatch --array=0-629%4 --export=OUT="$OUT",TASK_OFFSET=970 \
+#       scripts/hyak/tta_mccv_maml.sbatch
 
 set -euo pipefail
 mkdir -p logs
@@ -32,7 +38,11 @@ source "${REPO_DIR:-$HOME/py-tbfm}/scripts/hyak/env.sh"
 OUT="${OUT:?Set OUT to the output base dir}"
 MANIFEST="${OUT}/tta_manifest.csv"
 
-TASK_ID="${SLURM_ARRAY_TASK_ID}"
+# TASK_OFFSET lets a second (or later) submission stay under Klone's
+# MaxArraySize (1001, confirmed live via `scontrol show config`) while still
+# covering manifest task_ids above that -- e.g. --array=0-165 with
+# TASK_OFFSET=1434 covers manifest task_id 1434-1599.
+TASK_ID=$((SLURM_ARRAY_TASK_ID + ${TASK_OFFSET:-0}))
 
 read -r FOLD SESSION SUPPORT <<< "$(python -c "
 import csv
